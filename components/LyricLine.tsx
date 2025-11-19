@@ -4,7 +4,7 @@ import { LyricLine as LyricLineType } from "../types";
 const containsNonAscii = (text: string) => /[^\x00-\x7f]/.test(text);
 const isPunctuation = (text: string) => /^[\p{P}\p{S}]+$/u.test(text);
 const spacingClassForWord = (text: string) => {
-  if (isPunctuation(text)) return "mr-1";
+  if (isPunctuation(text)) return "mr-0.5";
   if (containsNonAscii(text)) return "mr-1.5";
   return "mr-2.5";
 };
