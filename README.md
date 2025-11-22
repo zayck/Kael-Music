@@ -8,6 +8,13 @@ This contains everything you need to run your app locally.
 
 View your app in AI Studio: https://ai.studio/apps/drive/1ggcfQNwQs0cGrbzb1oapySzBvuP5I1ha
 
+## Feature (Github Version)
+
+- [x] Fluid Backgroud with webgl [See](https://www.shadertoy.com/view/wdyczG)
+- [x] Canvas based lryic draw
+- [x] Search, Import music for \*\*music, or import local music
+- [x] Playspeed change, pitch change
+
 ## Run Locally
 
 **Prerequisites:** Node.js
