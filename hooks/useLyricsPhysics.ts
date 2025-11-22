@@ -27,7 +27,7 @@ export interface LinePhysicsState {
 const getLinePosSpring = (relativeIndex: number): SpringConfig => {
     // 1. Past Lines & Active Line: Extremely fast snap (High stiffness)
     if (relativeIndex <= 0) {
-        return { mass: 1, stiffness: 800, damping: 60, precision: 0.1 };
+        return { mass: 1, stiffness: 1200, damping: 60, precision: 0.1 };
     }
 
     // 2. Future Lines: "Fast to slow, variation needs to be larger"
@@ -40,7 +40,7 @@ const getLinePosSpring = (relativeIndex: number): SpringConfig => {
 
     // Exponential Decay for Large Variation
     // Reduced base stiffness and increased damping to prevent flickering
-    const base = 250;
+    const base = 300;
     const stiffness = Math.max(40, base * Math.pow(0.5, dist));
     const damping = Math.sqrt(stiffness) * 2.0; // Over-damped to prevent oscillation
 

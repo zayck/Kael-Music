@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from "react";
 import { useSpring, useTransition, animated, config } from "@react-spring/web";
 import { formatTime } from "../services/utils";
-import Visualizer from "./Visualizer";
+import Visualizer from "./visualizer/Visualizer";
 import {
   LoopIcon,
   LoopOneIcon,
@@ -563,9 +563,8 @@ const SettingsPopup: React.FC<SettingsPopupProps> = ({
       <div className="flex flex-col items-center justify-end gap-2 w-12 pb-6">
         <button
           onClick={onTogglePreservesPitch}
-          className={`w-12 h-12 rounded-full flex items-center justify-center transition-colors duration-200 ${
-            preservesPitch ? "bg-white/20 text-white" : "bg-white text-black"
-          }`}
+          className={`w-12 h-12 rounded-full flex items-center justify-center transition-colors duration-200 ${preservesPitch ? "bg-white/20 text-white" : "bg-white text-black"
+            }`}
           title={preservesPitch ? "Tone Preserved" : "Vinyl Mode"}
         >
           <span className="text-xs font-bold">

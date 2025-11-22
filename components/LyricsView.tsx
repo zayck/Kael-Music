@@ -1,8 +1,8 @@
-import React, { useRef, useEffect, useState } from "react";
+import React, { useRef, useEffect, useState, useMemo } from "react";
 import { LyricLine as LyricLineType } from "../types";
 import { useLyricsPhysics } from "../hooks/useLyricsPhysics";
 import { useCanvasRenderer } from "../hooks/useCanvasRenderer";
-import { measureLyrics, drawLyricLine, LineLayout } from "./LyricLineCanvas";
+import { LyricLine } from "./lyrics/LyricLine";
 
 interface LyricsViewProps {
   lyrics: LyricLineType[];
@@ -22,7 +22,7 @@ const LyricsView: React.FC<LyricsViewProps> = ({
   matchStatus,
 }) => {
   const [isMobile, setIsMobile] = useState(false);
-  const [lineLayouts, setLineLayouts] = useState<LineLayout[]>([]);
+  const [lyricLines, setLyricLines] = useState<LyricLine[]>([]);
   const containerRef = useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = useState(0);
 
@@ -50,42 +50,39 @@ const LyricsView: React.FC<LyricsViewProps> = ({
     return () => observer.disconnect();
   }, []);
 
-  // Measure Lyrics (Effect)
+  // Initialize and Measure LyricLines
   useEffect(() => {
     if (!lyrics.length || containerWidth <= 0) {
-      // Ensure we don't set null, always empty array
-      setLineLayouts((prev) => (prev.length === 0 ? prev : []));
+      setLyricLines([]);
       return;
     }
 
-    // Create a temporary canvas for measurement
-    const canvas = document.createElement("canvas");
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-
-    const { layouts } = measureLyrics(ctx, lyrics, containerWidth, isMobile);
-    setLineLayouts((prev) => {
-      if (prev.length !== layouts.length) {
-        return layouts;
-      }
-
-      const isSame =
-        prev.every(
-          (line, idx) =>
-            line.y === layouts[idx].y &&
-            line.height === layouts[idx].height &&
-            line.textWidth === layouts[idx].textWidth &&
-            line.fullText === layouts[idx].fullText &&
-            line.translation === layouts[idx].translation,
-        ) && prev.length === layouts.length;
-
-      return isSame ? prev : layouts;
+    // Create LyricLine instances
+    const lines = lyrics.map((line, index) => {
+      const lyricLine = new LyricLine(line, index, isMobile);
+      lyricLine.measure(containerWidth);
+      return lyricLine;
     });
+
+    setLyricLines(lines);
   }, [lyrics, containerWidth, isMobile]);
 
-  // Extract positions and heights for physics hook
-  const linePositions = lineLayouts.map((l) => l.y);
-  const lineHeights = lineLayouts.map((l) => l.height);
+  // Calculate layout properties for physics
+  const { linePositions, lineHeights } = useMemo(() => {
+    const positions: number[] = [];
+    const heights: number[] = [];
+    let currentY = 0;
+    const marginY = 12;
+
+    lyricLines.forEach((line) => {
+      const h = line.getHeight();
+      positions.push(currentY);
+      heights.push(h);
+      currentY += h + marginY;
+    });
+
+    return { linePositions: positions, lineHeights: heights };
+  }, [lyricLines]);
 
   // Physics Hook
   const { activeIndex, handlers, linesState, updatePhysics } = useLyricsPhysics(
@@ -95,7 +92,7 @@ const LyricsView: React.FC<LyricsViewProps> = ({
       currentTime,
       isMobile,
       containerHeight:
-        typeof window !== "undefined" ? window.innerHeight * 0.6 : 800, // Approx height
+        typeof window !== "undefined" ? window.innerHeight * 0.6 : 800,
       linePositions,
       lineHeights,
       isScrubbing: false,
@@ -104,6 +101,7 @@ const LyricsView: React.FC<LyricsViewProps> = ({
 
   // Mouse Interaction State
   const mouseRef = useRef({ x: 0, y: 0 });
+  const visualTimeRef = useRef(currentTime);
 
   // Mouse Tracking
   const handleMouseMove = (e: React.MouseEvent) => {
@@ -119,35 +117,50 @@ const LyricsView: React.FC<LyricsViewProps> = ({
     height: number,
     deltaTime: number,
   ) => {
-    // Update Physics (cap dt to prevent explosion on tab switch)
+    // Update Physics
     const dt = Math.min(deltaTime, 64) / 1000;
     updatePhysics(dt);
 
-    // Safeguard: Ensure lineLayouts is valid
-    if (!lineLayouts || lineLayouts.length === 0) return;
+    // Smooth lyric animation time
+    let visualTime = visualTimeRef.current;
+    const targetTime = currentTime;
+
+    if (isPlaying) {
+      visualTime += dt;
+      const drift = targetTime - visualTime;
+      visualTime += drift * 0.05;
+    } else {
+      // Ease quickly toward the real time when paused or scrubbing
+      const easeFactor = Math.min(1, dt * 8);
+      visualTime += (targetTime - visualTime) * easeFactor;
+    }
+
+    if (!Number.isFinite(visualTime) || Math.abs(targetTime - visualTime) > 2) {
+      visualTime = targetTime;
+    }
+
+    visualTimeRef.current = visualTime;
+
+    if (!lyricLines.length) return;
 
     const paddingX = isMobile ? 24 : 56;
-    const focalPointOffset = height * 0.25; // Initial top offset
+    const focalPointOffset = height * 0.25;
 
-    // Detect Hover (re-calculate every frame to be responsive to scrolling)
     let currentHover = -1;
 
-    // Render visible lines
-    lyrics.forEach((line, index) => {
-      const layout = lineLayouts[index];
-      if (!layout) return;
-
+    // First pass: Determine hover and visibility
+    // We can optimize this if needed, but for now iterating is fine.
+    // Actually, we need to iterate to draw anyway.
+    lyricLines.forEach((line, index) => {
       const physics = linesState.current.get(index);
       if (!physics) return;
 
-      // Calculate Y position
-      // layout.y is the static position in the document
-      // physics.posY.current is the global scroll offset (negative value)
       const globalScroll = physics.posY.current;
-      const visualY = layout.y + globalScroll + focalPointOffset;
+      const visualY = linePositions[index] + globalScroll + focalPointOffset;
+      const lineHeight = lineHeights[index];
 
       // Culling
-      if (visualY + layout.height < -100 || visualY > height + 100) {
+      if (visualY + lineHeight < -100 || visualY > height + 100) {
         return;
       }
 
@@ -156,7 +169,7 @@ const LyricsView: React.FC<LyricsViewProps> = ({
         mouseRef.current.x >= paddingX - 20 &&
         mouseRef.current.x <= width - paddingX + 20 &&
         mouseRef.current.y >= visualY &&
-        mouseRef.current.y <= visualY + layout.height
+        mouseRef.current.y <= visualY + lineHeight
       ) {
         currentHover = index;
       }
@@ -164,10 +177,9 @@ const LyricsView: React.FC<LyricsViewProps> = ({
       const isActive = index === activeIndex;
       const scale = physics.scale.current;
 
-      // Opacity & Blur Calculation
-      // Based on distance from focal point
-      const lineCenter = visualY + layout.height / 2;
-      const focusY = height * 0.35; // Match focal point
+      // Opacity & Blur
+      const lineCenter = visualY + lineHeight / 2;
+      const focusY = height * 0.35;
       const dist = Math.abs(lineCenter - focusY);
 
       let opacity = 1;
@@ -183,28 +195,48 @@ const LyricsView: React.FC<LyricsViewProps> = ({
         }
       }
 
-      // Force full opacity if hovered
       if (index === currentHover) {
         opacity = Math.max(opacity, 0.8);
         blur = 0;
       }
 
-      drawLyricLine(
-        ctx,
-        layout,
-        paddingX,
-        Math.round(visualY),
-        scale,
-        opacity,
-        blur,
+      // Update the line's internal state (draws to its own canvas)
+      // We only need to redraw if something changed (time, active state, hover)
+      // For now, we draw every frame because of the karaoke animation.
+      // Optimization: Only draw active line every frame? Or check if time is within line range?
+      // The LyricLine.draw method handles word animations.
+      line.draw(
+        isActive ? visualTime : currentTime,
         isActive,
-        currentTime,
-        isMobile,
         index === currentHover,
       );
+
+      // Draw the line's canvas onto the main canvas
+      ctx.save();
+
+      // Apply transformations
+      const cy = visualY + lineHeight / 2;
+      ctx.translate(0, cy); // Translate to vertical center of the line position
+      ctx.scale(scale, scale);
+      ctx.translate(0, -lineHeight / 2); // Translate back to top-left relative to center
+
+      ctx.globalAlpha = opacity;
+      if (blur > 0.5) {
+        ctx.filter = `blur(${blur}px)`;
+      } else {
+        ctx.filter = "none";
+      }
+
+      // The line canvas is already sized to containerWidth, so we draw it at (0, 0) relative to the translation
+      // But wait, our translation logic above assumes we are at the correct Y.
+      // We translated to (0, cy) then back up.
+      // So we draw at (0, 0).
+      ctx.drawImage(line.getCanvas(), 0, 0);
+
+      ctx.restore();
     });
 
-    // Draw Mask (Gradient at top/bottom)
+    // Draw Mask
     ctx.globalCompositeOperation = "destination-in";
     const maskGradient = ctx.createLinearGradient(0, 0, 0, height);
     maskGradient.addColorStop(0, "rgba(0,0,0,0)");
@@ -225,13 +257,15 @@ const LyricsView: React.FC<LyricsViewProps> = ({
     const height = rect.height;
     const focalPointOffset = height * 0.25;
 
-    for (let i = 0; i < lineLayouts.length; i++) {
-      const layout = lineLayouts[i];
+    for (let i = 0; i < lyricLines.length; i++) {
       const physics = linesState.current.get(i);
       if (!physics) continue;
 
-      const visualY = layout.y + physics.posY.current + focalPointOffset;
-      if (clickY >= visualY && clickY <= visualY + layout.height) {
+      const visualY =
+        linePositions[i] + physics.posY.current + focalPointOffset;
+      const h = lineHeights[i];
+
+      if (clickY >= visualY && clickY <= visualY + h) {
         onSeekRequest(lyrics[i].time, true);
         break;
       }
