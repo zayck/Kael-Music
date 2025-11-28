@@ -59,6 +59,14 @@ export const FUTURE_SPRING: SpringConfig = {
   precision: 0.1,
 };
 
+// Seek Spring: Faster than camera, but smooth
+export const SEEK_SPRING: SpringConfig = {
+  mass: 1,
+  stiffness: 180,
+  damping: 30,
+  precision: 0.1,
+};
+
 // Camera Spring: Smooth global scrolling
 export const CAMERA_SPRING: SpringConfig = {
   mass: 1,

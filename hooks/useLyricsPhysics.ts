@@ -40,9 +40,9 @@ const getLinePosSpring = (relativeIndex: number): SpringConfig => {
 
     // Exponential Decay for Large Variation
     // Reduced base stiffness and increased damping to prevent flickering
-    const base = 300;
-    const stiffness = Math.max(40, base * Math.pow(0.5, dist));
-    const damping = Math.sqrt(stiffness) * 2.0; // Over-damped to prevent oscillation
+    const base = 400;
+    const stiffness = Math.max(10, base * Math.pow(0.5, dist));
+    const damping = Math.sqrt(stiffness) * 1.5; // Over-damped to prevent oscillation
 
     return {
         mass: 1,
@@ -150,7 +150,8 @@ export const useLyricsPhysics = ({
 
         // 1. Handle Global Scroll Physics
         const timeSinceInteraction = now - sState.lastInteractionTime;
-        const userScrollActive = sState.isDragging || timeSinceInteraction < RESUME_DELAY_MS;
+        const userScrollActive = (sState.isDragging || timeSinceInteraction < RESUME_DELAY_MS) && Math.abs(currentTime - dt) > 3
+
 
         // Calculate target scroll based on active index
         const computeActiveScrollTarget = () => {
@@ -242,10 +243,8 @@ export const useLyricsPhysics = ({
             const dist = Math.abs(visualLineCenter - visualActivePoint);
 
             let targetScale = 1;
-            if (index !== activeIndex) {
-                const range = 450;
-                const normDist = Math.min(dist, range) / range;
-                targetScale = Math.max(0.85, 1 - 0.15 * normDist);
+            if (index === activeIndex) {
+                targetScale = 1.03
             }
 
             state.scale.target = targetScale;
@@ -289,6 +288,10 @@ export const useLyricsPhysics = ({
             const system = springSystem.current;
             const newY = system.getCurrent("scrollY") + e.deltaY;
             system.setValue("scrollY", newY);
+        },
+        onClick: () => {
+            scrollState.current.lastInteractionTime = 0;
+            scrollState.current.isDragging = false;
         }
     };
 

@@ -22,6 +22,37 @@ interface WordRenderSnapshot {
   lastGlowSample?: number;
 }
 
+// Apple Music Style Physics Constants
+const BREATH_PHYSICS = {
+  // Spring parameters for breathing lift effect
+  mass: 1.0,
+  stiffness: 180, // Natural frequency ~13.4 Hz
+  damping: 18, // Slightly under-damped for subtle overshoot
+  // Lift amounts based on word length
+  liftAmountShort: 2.8, // 1-3 chars
+  liftAmountMedium: 2.2, // 4-5 chars
+  liftAmountLong: 1.6, // 6+ chars
+  // Overshoot factor (1.0 = no overshoot, 1.15 = 15% overshoot)
+  overshootFactor: 1.12,
+};
+
+// Multi-layer glow configuration (Apple Music style)
+const GLOW_CONFIG = {
+  // Primary glow blur radius
+  blur: 24,
+  // Glow intensity multiplier
+  intensity: 0.85,
+  // Scale boost at peak glow
+  scaleBoost: 1.035,
+};
+
+// Wave propagation for character activation
+const WAVE_PHYSICS = {
+  speed: 2.8, // Characters per second equivalent
+  decay: 0.85, // Wave amplitude decay per character
+  wavelength: 2.5, // Characters width of the wave
+};
+
 export interface LineLayout {
   y: number; // Absolute Y position in the document (managed externally now, but kept for compatibility if needed)
   height: number;
@@ -523,7 +554,7 @@ export class LyricLine {
       return;
     } else if (currentTime > word.endTime) {
       word.renderProgress = 1;
-      this.drawStandardAnimation(word, 1, mainHeight);
+      this.drawStandardAnimation(word, 1, duration, mainHeight);
       this.ctx.restore();
       return;
     } else {
@@ -537,11 +568,126 @@ export class LyricLine {
       if (useGlow) {
         this.drawGlowAnimation(word, currentTime, elapsed, duration);
       } else {
-        this.drawStandardAnimation(word, easedProgress, mainHeight);
+        this.drawStandardAnimation(word, easedProgress, duration, mainHeight);
       }
     }
 
     this.ctx.restore();
+  }
+
+  /**
+   * Compute spring-based breathing envelope using critically damped spring physics.
+   * This creates the natural "breath" feel with optional subtle overshoot.
+   */
+  private computeBreathEnvelope(
+    progress: number,
+    isTransitioning: boolean,
+    transitionProgress: number,
+  ): number {
+    // Use a spring-inspired envelope: fast rise, natural decay
+    // Formula: x(t) = 1 - (1 + ωt)e^(-ωt) for critically damped rise
+    // Modified to create breathing pattern with overshoot
+
+    const { overshootFactor } = BREATH_PHYSICS;
+
+    // Phase 1: Attack (0 -> peak with overshoot)
+    // Phase 2: Sustain at peak
+    // Phase 3: Release (peak -> 0)
+
+    const attackEnd = 0.25;
+    const sustainEnd = 0.7;
+
+    let envelope = 0;
+
+    if (progress < attackEnd) {
+      // Attack phase: Spring-like rise with overshoot
+      const t = progress / attackEnd;
+      // Critically damped response with overshoot
+      const omega = 8; // Natural frequency
+      const dampedT = t * 3; // Scale for faster response
+      const springResponse =
+        1 - (1 + omega * dampedT) * Math.exp(-omega * dampedT);
+      // Add overshoot at the peak of attack
+      const overshoot =
+        Math.sin(t * Math.PI) * (overshootFactor - 1) * springResponse;
+      envelope = springResponse + overshoot;
+    } else if (progress < sustainEnd) {
+      // Sustain phase: Gentle breathing oscillation
+      const sustainT = (progress - attackEnd) / (sustainEnd - attackEnd);
+      // Subtle sine wave for "breathing" feel
+      const breathOscillation = Math.sin(sustainT * Math.PI * 2) * 0.08;
+      envelope = 1 + breathOscillation;
+    } else {
+      // Release phase: Smooth exponential decay
+      const releaseT = (progress - sustainEnd) / (1 - sustainEnd);
+      // Exponential decay for natural release
+      envelope = Math.exp(-releaseT * 3);
+    }
+
+    // Apply transition fade-out with physics-based deceleration
+    if (isTransitioning) {
+      // Use spring-based deceleration curve
+      const decel = 1 - Math.pow(transitionProgress, 2) * (3 - 2 * transitionProgress);
+      envelope *= decel;
+    }
+
+    return Math.max(0, Math.min(1.2, envelope));
+  }
+
+  /**
+   * Compute wave-based character activation using physics wave propagation.
+   * Creates the smooth left-to-right highlight sweep.
+   */
+  private computeWaveActivation(
+    charIndex: number,
+    charCount: number,
+    progress: number,
+  ): { activation: number; waveIntensity: number } {
+    const { speed, decay, wavelength } = WAVE_PHYSICS;
+
+    // Wave front position (0 to charCount)
+    const waveFront = progress * (charCount + wavelength * 2) - wavelength;
+
+    // Distance from wave front
+    const distFromFront = charIndex - waveFront;
+
+    // Gaussian wave packet for smooth activation
+    const sigma = wavelength / 2;
+    const wavePacket = Math.exp(
+      -(distFromFront * distFromFront) / (2 * sigma * sigma),
+    );
+
+    // Activation: 1 if wave has passed, smooth transition at front
+    let activation = 0;
+    if (distFromFront < -wavelength) {
+      activation = 1;
+    } else if (distFromFront > wavelength) {
+      activation = 0;
+    } else {
+      // Smooth step using hermite interpolation
+      const t = (-distFromFront + wavelength) / (2 * wavelength);
+      activation = t * t * (3 - 2 * t);
+    }
+
+    // Wave intensity for glow effect (peaks at wave front)
+    const waveIntensity = wavePacket * Math.pow(decay, Math.abs(distFromFront));
+
+    return { activation, waveIntensity };
+  }
+
+  /**
+   * Draw glow effect - single layer to avoid multiple shadows
+   */
+  private applyGlow(intensity: number) {
+    if (intensity < 0.01) {
+      this.ctx.shadowBlur = 0;
+      this.ctx.shadowColor = "transparent";
+      return;
+    }
+    const blur = GLOW_CONFIG.blur * (0.5 + 0.5 * intensity);
+    const alpha = GLOW_CONFIG.intensity * intensity;
+    this.ctx.shadowColor = `rgba(255, 255, 255, ${alpha})`;
+    this.ctx.shadowBlur = blur;
   }
 
   private drawGlowAnimation(
@@ -557,53 +703,50 @@ export class LyricLine {
     }
 
     const charCount = chars.length;
+
+    // Calculate effective duration based on character count
     const baseTimePerChar =
-      charCount <= 3 ? 0.25 : charCount <= 5 ? 0.25 : 0.18;
-    const MAX_GLOW_DURATION = Math.max(1.0, charCount * baseTimePerChar);
+      charCount <= 3 ? 0.28 : charCount <= 5 ? 0.22 : 0.16;
+    const MAX_GLOW_DURATION = Math.max(1.2, charCount * baseTimePerChar);
     const effectiveDuration = Math.min(duration, MAX_GLOW_DURATION);
-    const TRANSITION_DURATION = 0.3; // Transition period to smoothly return to original position
+    const TRANSITION_DURATION = 0.35;
+
     const isAnimating = elapsed < effectiveDuration;
     const isTransitioning =
       elapsed >= effectiveDuration &&
       elapsed < effectiveDuration + TRANSITION_DURATION;
 
-    const spread = duration;
-
+    // Calculate animation progress
     let effectiveP = 0;
     if (effectiveDuration > 0) {
       const rawP = Math.max(0, Math.min(1, elapsed / effectiveDuration));
-      effectiveP = 1 - Math.pow(1 - rawP, 3);
+      effectiveP = 1 - Math.pow(1 - rawP, 2.5);
     }
     if (!isAnimating && !isTransitioning) effectiveP = 1;
 
-    const normalizedProgress = Math.max(0, Math.min(1, effectiveP));
-    let lifeWeight = Math.sin(normalizedProgress * Math.PI);
-
-    // Apply smooth transition when animation ends
+    // Calculate transition progress
+    let transitionProgress = 0;
     if (isTransitioning) {
-      const transitionElapsed = elapsed - effectiveDuration;
-      const transitionProgress = transitionElapsed / TRANSITION_DURATION;
-      // Ease out cubic for smooth deceleration
-      const easedTransition = 1 - Math.pow(1 - transitionProgress, 3);
-      lifeWeight *= 1 - easedTransition; // Smoothly reduce lifeWeight to 0
+      transitionProgress = (elapsed - effectiveDuration) / TRANSITION_DURATION;
     }
 
-    const baseBlur = charCount <= 3 ? 28 : charCount <= 5 ? 22 : 18;
-    const breathBlur = baseBlur * (0.4 + 0.6 * lifeWeight);
+    // Compute physics-based breathing envelope
+    const breathEnvelope = this.computeBreathEnvelope(
+      Math.min(1, effectiveP),
+      isTransitioning,
+      transitionProgress,
+    );
 
-    const breathScaleAmount =
-      charCount <= 3 ? 0.035 : charCount <= 5 ? 0.025 : 0.018;
-    const breathScale = 1.0 + breathScaleAmount * lifeWeight;
-    const breathLiftAmount = charCount <= 3 ? 1.9 : charCount <= 5 ? 1.4 : 1.1;
-    const breathLift = breathLiftAmount * lifeWeight;
+    // Calculate breath lift using spring physics
+    const baseLift =
+      charCount <= 3
+        ? BREATH_PHYSICS.liftAmountShort
+        : charCount <= 5
+          ? BREATH_PHYSICS.liftAmountMedium
+          : BREATH_PHYSICS.liftAmountLong;
+    const breathLift = baseLift * breathEnvelope;
 
-    this.ctx.shadowColor = isAnimating
-      ? `rgba(255, 255, 255, ${0.55 + 0.3 * lifeWeight})`
-      : `rgba(255, 255, 255, ${0.3 * lifeWeight})`;
-    this.ctx.shadowBlur = breathBlur;
-
-    const activeIndex = effectiveP * (chars.length + spread * 2) - spread;
-
+    // Prepare character metrics
     if (!word.charWidths || !word.charOffsets) {
       const { charWidths, charOffsets } = this.computeCharMetrics(
         word.text,
@@ -613,56 +756,62 @@ export class LyricLine {
       word.charOffsets = charOffsets;
     }
 
+    const { mainHeight } = getFonts(this.isMobile);
+
+    // Draw base text layer (dim inactive layer) - NO glow here
     this.ctx.save();
-    this.ctx.fillStyle = `rgba(255, 255, 255, ${0.35 + 0.25 * lifeWeight})`;
+    this.ctx.shadowBlur = 0;
+    this.ctx.shadowColor = "transparent";
+    this.ctx.fillStyle = `rgba(255, 255, 255, ${0.30 + 0.15 * breathEnvelope})`;
     this.ctx.fillText(word.text, 0, 0);
     this.ctx.restore();
 
-    this.ctx.save();
-    this.ctx.translate(0, -breathLift);
-
+    // Draw individual characters with wave activation, glow, and scale
     chars.forEach((char, charIndex) => {
-      const charWidth =
-        word.charWidths?.[charIndex] ?? this.ctx.measureText(char).width;
       const charX = word.charOffsets?.[charIndex] ?? 0;
-      const dist = Math.abs(charIndex - activeIndex);
+      const charWidth = word.charWidths?.[charIndex] ?? this.ctx.measureText(char).width;
 
-      const gaussian = Math.exp(-(dist * dist) / (2 * spread * spread));
-      const glowStrength = gaussian * lifeWeight;
+      // Compute wave-based activation
+      const { activation, waveIntensity } = this.computeWaveActivation(
+        charIndex,
+        charCount,
+        effectiveP,
+      );
 
-      const charNormalizedPos = charIndex / Math.max(1, chars.length - 1);
-      const activationProgress = effectiveP;
+      // Combine activation with breathing envelope
+      const combinedIntensity = Math.max(activation, waveIntensity * breathEnvelope);
+      const brightness = 0.40 + combinedIntensity * 0.60;
 
-      const activationWindow = charCount <= 3 ? 0.4 : 0.3;
-      const charActivationStart = charNormalizedPos - activationWindow;
-      const charActivationEnd = charNormalizedPos + activationWindow;
-
-      let charActivation = 0;
-      if (activationProgress < charActivationStart) {
-        charActivation = 0;
-      } else if (activationProgress > charActivationEnd) {
-        charActivation = 1;
-      } else {
-        const t =
-          (activationProgress - charActivationStart) /
-          (charActivationEnd - charActivationStart);
-        charActivation = t * t * (3 - 2 * t);
-      }
+      // Calculate per-character scale based on wave intensity
+      const charScale = 1 + (GLOW_CONFIG.scaleBoost - 1) * waveIntensity * breathEnvelope;
+      // Per-character lift (wave front lifts more)
+      const charLift = breathLift * (0.6 + 0.4 * waveIntensity);
 
       this.ctx.save();
-      this.ctx.translate(charX, 0);
 
-      const intensity = Math.max(charActivation, glowStrength);
-      const brightness = Math.max(0.45, Math.min(1.0, 0.45 + intensity * 0.55));
+      // Transform from character center for scale
+      const charCenterX = charX + charWidth / 2;
+      const charCenterY = mainHeight / 2;
+
+      this.ctx.translate(charCenterX, charCenterY);
+      this.ctx.scale(charScale, charScale);
+      this.ctx.translate(-charCenterX, -charCenterY - charLift);
+
+      // Apply glow based on wave intensity (glow follows the wave front)
+      const glowIntensity = waveIntensity * breathEnvelope;
+      this.applyGlow(glowIntensity);
+
+      // Draw character with appropriate brightness
       this.ctx.fillStyle =
-        charActivation > 0.9 ? "#ffffff" : `rgba(255, 255, 255, ${brightness})`;
+        activation > 0.95
+          ? "#ffffff"
+          : `rgba(255, 255, 255, ${Math.min(1, brightness)})`;
+      this.ctx.fillText(char, charX, 0);
 
-      this.ctx.fillText(char, 0, 0);
       this.ctx.restore();
     });
 
-    this.ctx.restore();
-
+    // Clean up shadow state
     this.ctx.shadowBlur = 0;
     this.ctx.shadowColor = "transparent";
   }
@@ -670,12 +819,14 @@ export class LyricLine {
   private drawStandardAnimation(
     word: WordLayout,
     progress: number,
+    duration: number,
     mainHeight: number,
   ) {
-    // If animation is complete, draw the full word flat and exit
+    // If animation is complete, draw the full word with subtle float
     if (progress >= 1) {
       this.ctx.save();
-      this.ctx.fillStyle = "#ffffff"; // Full highlight color
+      this.ctx.fillStyle = "#ffffff";
+      // Maintain slight lift for completed words
       this.ctx.fillText(word.text, 0, -2);
       this.ctx.restore();
       return;
@@ -687,19 +838,30 @@ export class LyricLine {
     );
     const remainingWidth = Math.max(0, word.width - highlightWidth);
 
-    // Calculate animation values
-    const easeVal = this.easeInOutCubic(progress);
-    const maxSkew = 0.00035;
-    const skewX = maxSkew * (1 - easeVal);
-    const liftMax = -2;
-    const lift = liftMax * easeVal;
+    // Physics-based animation values using spring mechanics
+    // Use critically damped spring response for smooth, natural motion
+    const springResponse = 1 - Math.pow(1 - progress, 2.2);
+
+    // Skew: starts with slight forward lean, settles to upright
+    // Models the "momentum" of text being revealed
+    const maxSkew = 0.0004;
+    const skewDecay = Math.exp(-progress * 4); // Exponential decay
+    const skewX = maxSkew * skewDecay;
+
+    // Lift: spring-based rise with slight overshoot then settle
+    // Uses underdamped spring formula for natural feel
+    const liftMax = -2.5;
+    const overshoot = 1.08; // 8% overshoot
+    const dampedOscillation =
+      1 - Math.exp(-progress * 5) * Math.cos(progress * Math.PI * 0.5);
+    const lift = liftMax * Math.min(dampedOscillation * overshoot, 1);
 
     // Apply transform to the ENTIRE word context
     this.ctx.save();
     this.ctx.translate(0, lift);
     this.ctx.transform(1, 0, -skewX, 1, 0, 0);
 
-    // Draw inactive part (clipped)
+    // Draw inactive part (clipped) - upcoming text
     if (remainingWidth > 0) {
       this.ctx.save();
       this.ctx.beginPath();
@@ -710,14 +872,27 @@ export class LyricLine {
         mainHeight * 1.35,
       );
       this.ctx.clip();
-      this.ctx.fillStyle = "rgba(255, 255, 255, 0.45)";
+      this.ctx.fillStyle = "rgba(255, 255, 255, 0.42)";
       this.ctx.fillText(word.text, 0, 0);
       this.ctx.restore();
     }
 
-    // Draw active part (clipped)
+    // Draw active part (clipped) - revealed text with subtle glow
     if (highlightWidth > 0.25) {
       const gradientWidth = Math.max(word.width, 1);
+
+      // Add subtle glow to the leading edge using physics-based falloff
+      const edgeGlow = Math.exp(-Math.pow(progress - 0.5, 2) * 8) * 0.3;
+      if (edgeGlow > 0.05) {
+        this.ctx.save();
+        this.ctx.shadowColor = `rgba(255, 255, 255, ${edgeGlow})`;
+        this.ctx.shadowBlur = 8;
+        this.ctx.fillStyle = "transparent";
+        this.ctx.fillText(word.text, 0, 0);
+        this.ctx.restore();
+      }
+
+      // Create gradient for smooth reveal
       const fillGradient = this.ctx.createLinearGradient(
         0,
         0,
@@ -725,11 +900,16 @@ export class LyricLine {
         0,
       );
       fillGradient.addColorStop(0, "#ffffff");
-      fillGradient.addColorStop(1, "rgba(255, 255, 255, 0.65)");
+      fillGradient.addColorStop(1, "rgba(255, 255, 255, 0.7)");
 
       this.ctx.save();
       this.ctx.beginPath();
-      this.ctx.rect(-2, -mainHeight * 0.2, highlightWidth + 4, mainHeight * 1.35);
+      this.ctx.rect(
+        -2,
+        -mainHeight * 0.2,
+        highlightWidth + 4,
+        mainHeight * 1.35,
+      );
       this.ctx.clip();
       this.ctx.fillStyle = fillGradient;
       this.ctx.fillText(word.text, 0, 0);
@@ -772,11 +952,19 @@ export class LyricLine {
     if (word.renderProgress === undefined) {
       word.renderProgress = target;
     } else {
-      word.renderProgress += (target - word.renderProgress) * 0.25;
+      // Use exponential smoothing with adaptive rate
+      // Faster response when far from target, slower when close (spring-like behavior)
+      const delta = target - word.renderProgress;
+      const adaptiveRate = 0.15 + Math.abs(delta) * 0.2;
+      word.renderProgress += delta * Math.min(adaptiveRate, 0.4);
     }
     return Math.max(0, Math.min(1, word.renderProgress));
   }
 
+  /**
+   * Attempt to remove easeInOutCubic to clean up unused code.
+   * The physics-based animations now use spring mechanics directly.
+   */
   private easeInOutCubic(t: number): number {
     return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
   }

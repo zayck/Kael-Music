@@ -121,22 +121,34 @@ const LyricsView: React.FC<LyricsViewProps> = ({
     const dt = Math.min(deltaTime, 64) / 1000;
     updatePhysics(dt);
 
-    // Smooth lyric animation time
+    // Smooth visual time interpolation
+    // currentTime updates infrequently (every 50-200ms), but we render at high fps
+    // We need to interpolate between frames while catching up to the real time
     let visualTime = visualTimeRef.current;
     const targetTime = currentTime;
 
     if (isPlaying) {
-      visualTime += dt;
+      const playbackRate = audioRef.current?.playbackRate || 1;
+      // Advance time based on dt and playback rate
+      visualTime += dt * playbackRate;
+
       const drift = targetTime - visualTime;
-      visualTime += drift * 0.05;
+      // Exponential smoothing to catch up to target time
+      // tau = 0.12s means ~63% of drift corrected within 120ms
+      // Balances smoothness with responsiveness
+      const tau = 0.2;
+      const smoothing = 1 - Math.exp(-dt / tau);
+      visualTime += drift * smoothing;
     } else {
-      // Ease quickly toward the real time when paused or scrubbing
-      const easeFactor = Math.min(1, dt * 8);
+      // When paused or scrubbing, snap quickly to real time
+      const easeFactor = Math.min(1, dt * 10);
       visualTime += (targetTime - visualTime) * easeFactor;
     }
 
-    if (!Number.isFinite(visualTime) || Math.abs(targetTime - visualTime) > 2) {
+    // Detect large jumps (seek operations or anomalies)
+    if (!Number.isFinite(visualTime) || Math.abs(targetTime - visualTime) > 1) {
       visualTime = targetTime;
+      handlers.onClick();
     }
 
     visualTimeRef.current = visualTime;
@@ -274,6 +286,7 @@ const LyricsView: React.FC<LyricsViewProps> = ({
 
       if (clickY >= visualY && clickY <= visualY + h) {
         onSeekRequest(lyrics[i].time, true);
+        handlers.onClick();
         break;
       }
     }
