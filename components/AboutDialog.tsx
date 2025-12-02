@@ -53,7 +53,7 @@ const AboutDialog: React.FC<AboutDialogProps> = ({ isOpen, onClose }) => {
                         Aura Music
                     </h3>
                     <div className="inline-flex items-center px-2.5 py-0.5 rounded-full bg-white/5 border border-white/5 text-[11px] font-medium text-white/40 tracking-wide uppercase mb-6">
-                        v1.3.0 • Pure Web
+                        v1.4.0 • Web
                     </div>
 
                     {/* Description */}
@@ -92,7 +92,7 @@ const AboutDialog: React.FC<AboutDialogProps> = ({ isOpen, onClose }) => {
                             onClick={(e) => e.stopPropagation()}
                             className="flex items-center justify-between px-4 py-3 rounded-2xl border border-white/15 bg-white/5 text-sm font-medium text-white/80 hover:bg-white/10 transition"
                         >
-                            <span>Created by dingyi</span>
+                            <span>Created by dingyi222666</span>
                             <span className="text-[11px] text-white/50">↗</span>
                         </a>
                     </div>

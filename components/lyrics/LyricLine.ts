@@ -1,6 +1,23 @@
 import { LyricLine as LyricLineType } from "../../types";
 import { ILyricLine } from "./ILyricLine";
 
+const GLOW_CONFIG = {
+  // Primary glow blur radius
+  blur: 12,
+  // Glow intensity multiplier
+  intensity: 0.5,
+  // Scale boost at peak glow - increased for magnification effect
+  scaleBoost: 1.03,
+};
+
+// Wave propagation for character activation
+
+const WAVE_PHYSICS = {
+  speed: 3.5, // Characters per second equivalent
+  decay: 0.85, // Wave amplitude decay per character
+  wavelength: 3.0, // Characters width of the wave
+};
+
 export interface WordLayout {
   text: string;
   x: number;
@@ -12,56 +29,18 @@ export interface WordLayout {
   charWidths?: number[];
   charOffsets?: number[];
   renderProgress?: number;
-  renderSnapshot?: WordRenderSnapshot;
 }
 
-type WordRenderPhase = "before" | "active-standard" | "active-glow" | "after";
-
-interface WordRenderSnapshot {
-  phase: WordRenderPhase;
-  rawProgress: number;
-  lastGlowSample?: number;
-}
-
-// Apple Music Style Physics Constants
-const BREATH_PHYSICS = {
-  // Spring parameters for breathing lift effect
-  mass: 1.0,
-  stiffness: 180, // Natural frequency ~13.4 Hz
-  damping: 18, // Slightly under-damped for subtle overshoot
-  // Lift amounts based on word length
-  liftAmountShort: 2.8, // 1-3 chars
-  liftAmountMedium: 2.2, // 4-5 chars
-  liftAmountLong: 1.6, // 6+ chars
-  // Overshoot factor (1.0 = no overshoot, 1.15 = 15% overshoot)
-  overshootFactor: 1.12,
-};
-
-// Multi-layer glow configuration (Apple Music style)
-const GLOW_CONFIG = {
-  // Primary glow blur radius
-  blur: 24,
-  // Glow intensity multiplier
-  intensity: 0.85,
-  // Scale boost at peak glow
-  scaleBoost: 1.035,
-};
-
-// Wave propagation for character activation
-const WAVE_PHYSICS = {
-  speed: 2.8, // Characters per second equivalent
-  decay: 0.85, // Wave amplitude decay per character
-  wavelength: 2.5, // Characters width of the wave
-};
+const WRAPPED_LINE_GAP_RATIO = 0.25; // Extra spacing between auto-wrapped lyric lines
 
 export interface LineLayout {
-  y: number; // Absolute Y position in the document (managed externally now, but kept for compatibility if needed)
+  y: number; 
   height: number;
   words: WordLayout[];
   fullText: string;
   translation?: string;
-  translationLines?: string[]; // New field for wrapped translation
-  textWidth: number; // Max width of the text block
+  translationLines?: string[];
+  textWidth: number; 
   translationWidth?: number;
 }
 
@@ -71,14 +50,14 @@ const detectLanguage = (text: string) => {
 };
 
 // Font configuration
+
 const getFonts = (isMobile: boolean) => {
-  // Sizes matched to previous Tailwind classes (text-3xl/4xl/5xl)
   const baseSize = isMobile ? 32 : 40;
   const transSize = isMobile ? 18 : 22;
   return {
     main: `800 ${baseSize}px "PingFang SC", "Inter", sans-serif`,
     trans: `500 ${transSize}px "PingFang SC", "Inter", sans-serif`,
-    mainHeight: baseSize, // Increased line height for better wrapping
+    mainHeight: baseSize,
     transHeight: transSize * 1.3,
   };
 };
@@ -88,9 +67,7 @@ export class LyricLine implements ILyricLine {
   private ctx: OffscreenCanvasRenderingContext2D | CanvasRenderingContext2D;
   private layout: LineLayout | null = null;
   private lyricLine: LyricLineType;
-  private index: number;
   private isMobile: boolean;
-  private lastDrawTime: number = -1;
   private _height: number = 0;
   private lastIsActive: boolean = false;
   private lastIsHovered: boolean = false;
@@ -98,75 +75,28 @@ export class LyricLine implements ILyricLine {
   private pixelRatio: number;
   private logicalWidth: number = 0;
   private logicalHeight: number = 0;
+  private wordCacheCanvas: OffscreenCanvas | HTMLCanvasElement;
+  private wordCacheCtx:
+    | OffscreenCanvasRenderingContext2D
+    | CanvasRenderingContext2D;
+  private cachedWordKey: string = "";
 
   constructor(line: LyricLineType, index: number, isMobile: boolean) {
     this.lyricLine = line;
-    this.index = index;
     this.isMobile = isMobile;
     this.pixelRatio =
       typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1;
-
     this.canvas = document.createElement("canvas");
-
+    this.wordCacheCanvas = document.createElement("canvas");
     const ctx = this.canvas.getContext("2d");
-    if (!ctx) throw new Error("Could not get canvas context");
+    const cacheCtx = this.wordCacheCanvas.getContext("2d");
+    if (!ctx || !cacheCtx) throw new Error("Could not get canvas context");
     this.ctx = ctx as
       | OffscreenCanvasRenderingContext2D
       | CanvasRenderingContext2D;
-  }
-
-  private shouldUseGlow(word: WordLayout, duration: number) {
-    return duration > 1 && word.text.length <= 7;
-  }
-
-  private computeWordSnapshot(
-    word: WordLayout,
-    currentTime: number,
-  ): WordRenderSnapshot {
-    const duration = word.endTime - word.startTime;
-    if (currentTime <= word.startTime) {
-      return { phase: "before", rawProgress: 0 };
-    }
-
-    if (duration <= 0 || currentTime >= word.endTime) {
-      return { phase: "after", rawProgress: 1 };
-    }
-
-    const elapsed = currentTime - word.startTime;
-    const rawProgress = Math.max(0, Math.min(1, elapsed / duration));
-    const phase = this.shouldUseGlow(word, duration)
-      ? "active-glow"
-      : "active-standard";
-
-    return { phase, rawProgress };
-  }
-
-  private shouldRedrawWord(
-    word: WordLayout,
-    snapshot: WordRenderSnapshot,
-    currentTime: number,
-  ) {
-    if (!word.renderSnapshot) return true;
-    if (word.renderSnapshot.phase !== snapshot.phase) return true;
-
-    if (snapshot.phase === "active-standard") {
-      return (
-        Math.abs(snapshot.rawProgress - word.renderSnapshot.rawProgress) > 0.003
-      );
-    }
-
-    if (snapshot.phase === "active-glow") {
-      const progressDelta = Math.abs(
-        snapshot.rawProgress - word.renderSnapshot.rawProgress,
-      );
-      const timeDelta =
-        !word.renderSnapshot.lastGlowSample ||
-        currentTime - word.renderSnapshot.lastGlowSample > 0.05;
-
-      return progressDelta > 0.002 || timeDelta;
-    }
-
-    return false;
+    this.wordCacheCtx = cacheCtx as
+      | OffscreenCanvasRenderingContext2D
+      | CanvasRenderingContext2D;
   }
 
   private drawFullLine({
@@ -179,7 +109,6 @@ export class LyricLine implements ILyricLine {
     mainHeight,
     transHeight,
     paddingX,
-    snapshots,
   }: {
     currentTime: number;
     isActive: boolean;
@@ -190,65 +119,136 @@ export class LyricLine implements ILyricLine {
     mainHeight: number;
     transHeight: number;
     paddingX: number;
-    snapshots?: Map<WordLayout, WordRenderSnapshot>;
   }) {
     if (!this.layout) return;
 
-    // Use logical dimensions for clearRect since context is already scaled
     this.ctx.clearRect(0, 0, this.logicalWidth, this.logicalHeight);
     this.ctx.save();
-
-    if (isHovered) {
-      this.ctx.fillStyle = "rgba(255, 255, 255, 0.08)";
-      const bgWidth = Math.max(this.layout.textWidth + 32, 200);
-      this.roundRect(paddingX - 16, 0, bgWidth, this.layout.height, 16);
-      this.ctx.fill();
-    }
 
     this.ctx.font = mainFont;
     this.ctx.textBaseline = "top";
     this.ctx.translate(paddingX, 0);
 
-    if (!isActive) {
-      this.ctx.fillStyle = "rgba(255, 255, 255, 0.6)";
-      this.layout.words.forEach((w) => {
-        this.ctx.fillText(w.text, w.x, w.y);
-        w.renderSnapshot = undefined;
-        w.renderProgress = undefined;
-      });
-    } else if (!hasTimedWords) {
-      this.ctx.fillStyle = "#ffffff";
-      this.layout.words.forEach((w) => {
-        this.ctx.fillText(w.text, w.x, w.y);
-        w.renderSnapshot = undefined;
-        w.renderProgress = undefined;
-      });
-    } else {
-      this.layout.words.forEach((w) => {
-        const snapshot =
-          snapshots?.get(w) ?? this.computeWordSnapshot(w, currentTime);
-        this.drawLyricWord(w, currentTime);
-        w.renderSnapshot = {
-          ...snapshot,
-          lastGlowSample:
-            snapshot.phase === "active-glow" ? currentTime : undefined,
-        };
-      });
+    // 1. Draw Background (Hover)
+    if (isHovered) {
+      this.ctx.fillStyle = "rgba(255, 255, 255, 0.08)";
+      const bgWidth = Math.max(this.layout.textWidth + 32, 200);
+      this.roundRect(-16, 0, bgWidth, this.layout.height, 16);
+      this.ctx.fill();
     }
 
-    if (
-      this.layout.translationLines &&
-      this.layout.translationLines.length > 0
-    ) {
+    // 2. Determine Active Line Context
+    let activeLineY: number | null = null;
+    let cursorX = 0;
+    let activeWords: WordLayout[] = [];
+
+    if (isActive && hasTimedWords) {
+      const activeIdx = this.layout.words.findIndex(
+        (w) => currentTime >= w.startTime && currentTime < w.endTime
+      );
+      
+      let currentWord: WordLayout | null = null;
+      if (activeIdx !== -1) {
+          currentWord = this.layout.words[activeIdx];
+      } else {
+           const nextWordIdx = this.layout.words.findIndex(w => w.startTime > currentTime);
+           if (nextWordIdx > 0) currentWord = this.layout.words[nextWordIdx - 1];
+           else if (nextWordIdx === -1) currentWord = this.layout.words[this.layout.words.length - 1];
+           else currentWord = this.layout.words[0];
+      }
+
+      if (currentWord) {
+          activeLineY = currentWord.y;
+          activeWords = this.layout.words.filter(w => Math.abs(w.y - activeLineY!) < 5);
+           // Cursor calculation
+          if (activeIdx !== -1) {
+              const w = this.layout.words[activeIdx];
+              const p = (currentTime - w.startTime) / (w.endTime - w.startTime);
+              cursorX = w.x + w.width * p;
+          } else {
+              // Simplified gap logic
+              const nextIdx = this.layout.words.findIndex(w => w.startTime > currentTime);
+              if (nextIdx > 0) cursorX = this.layout.words[nextIdx - 1].x + this.layout.words[nextIdx - 1].width;
+              else if (nextIdx === -1) {
+                  const last = this.layout.words[this.layout.words.length - 1];
+                  cursorX = last.x + last.width;
+              }
+              else cursorX = 0;
+          }
+      }
+    }
+
+    // 3. Rendering Strategy
+    if (isActive && !hasTimedWords) {
+        // CASE: Active but standard text (no timing) -> Pure White
+        this.ctx.fillStyle = "#FFFFFF";
+        this.layout.words.forEach(w => this.ctx.fillText(w.text, w.x, w.y));
+    } 
+    else if (isActive && activeLineY !== null && activeWords.length > 0) {
+        // CASE: Active with Timing -> Fluid Animation
+        
+        // Render static inactive lines first
+        this.ctx.fillStyle = "rgba(255, 255, 255, 0.5)";
+        this.layout.words.forEach(w => {
+            if (Math.abs(w.y - activeLineY!) >= 5) {
+                 // Past lines white, Future dim
+                 if (w.y < activeLineY!) {
+                     this.ctx.fillStyle = "#FFFFFF";
+                     this.ctx.fillText(w.text, w.x, w.y - 4.0); // Static Lift for past lines
+                 } else {
+                     this.ctx.fillStyle = "rgba(255, 255, 255, 0.5)";
+                     this.ctx.fillText(w.text, w.x, w.y);
+                 }
+            }
+        });
+
+        // Render Active Line with Fluid Effect
+        this.renderActiveFluidLine(activeWords, activeLineY, cursorX, mainFont, mainHeight);
+
+        // Extra Glow Animation for specific words
+        activeWords.forEach(w => {
+             const duration = w.endTime - w.startTime;
+             // Apply glow only to short words (length <= 7) that are currently playing
+             if (w.text.length <= 7 && duration > 1.5) {
+                 this.ctx.save();
+                 this.ctx.translate(w.x, w.y);
+                 
+                 const elapsed = currentTime - w.startTime;
+                 const isWordActive = elapsed >= 0 && elapsed < duration;
+                 
+                 if (isWordActive) {
+                      // Calculate decay for the glow effect
+                      // For simplicity, we can use the progress to determine if we are in the tail end
+                      // or pass a decay factor based on word completion
+                      const progress = Math.max(0, Math.min(1, elapsed / duration));
+                      // Simple decay logic: fade out near the very end if needed, 
+                      // but drawGlowAnimation handles "wave" decay internally via wave physics.
+                      // We pass 0 as decayFactor for active words (standard state), 
+                      // or calculate it if we want a fade-out.
+                      // The original code passed 'decay' from breath envelope? 
+                      // Let's use breath envelope for attack.
+                      const decay = this.computeBreathEnvelope(progress, false, 0);
+                      
+                      this.drawGlowAnimation(w, elapsed, duration, decay);
+                 }
+                 this.ctx.restore();
+             }
+        });
+
+    } else {
+        // CASE: Completely Inactive Line -> Dim
+        this.ctx.fillStyle = "rgba(255, 255, 255, 0.5)";
+        this.layout.words.forEach(w => this.ctx.fillText(w.text, w.x, w.y));
+    }
+
+    // 4. Translation
+    if (this.layout.translationLines && this.layout.translationLines.length > 0) {
       this.ctx.font = transFont;
       this.ctx.fillStyle = "rgba(255, 255, 255, 0.6)";
-
-      const lastWordY =
-        this.layout.words.length > 0
+      const lastWordY = this.layout.words.length > 0
           ? this.layout.words[this.layout.words.length - 1].y
           : 0;
       let transY = lastWordY + mainHeight * 1.2;
-
       this.layout.translationLines.forEach((lineText) => {
         this.ctx.fillText(lineText, 0, transY);
         transY += transHeight;
@@ -258,8 +258,398 @@ export class LyricLine implements ILyricLine {
     this.ctx.restore();
   }
 
+  private renderActiveFluidLine(
+      words: WordLayout[], 
+      lineY: number, 
+      cursorX: number, 
+      font: string,
+      mainHeight: number
+  ) {
+      const MAX_LIFT = -4.0;
+      const SLOPE_STEEPNESS = 0.025;
+      const LOOKAHEAD_PX = 40;
+      const WAVE_EXTENT = 250;
+      const effectiveCursor = cursorX + LOOKAHEAD_PX;
+      
+      const lineW = this.layout!.textWidth + 50;
+      const lineH = mainHeight * 1.5;
+      const pixelRatio = this.pixelRatio;
+      const requiredWidth = Math.ceil(lineW * pixelRatio);
+      const requiredHeight = Math.ceil(lineH * pixelRatio);
+
+      // Invalidate cache key because we are about to overwrite the buffer with the full line
+      this.cachedWordKey = "";
+
+      // Ensure buffer size
+      if (this.wordCacheCanvas.width < requiredWidth || this.wordCacheCanvas.height < requiredHeight) {
+          this.wordCacheCanvas.width = Math.max(requiredWidth, this.wordCacheCanvas.width);
+          this.wordCacheCanvas.height = Math.max(requiredHeight, this.wordCacheCanvas.height);
+      }
+      
+      // Draw clean text to buffer
+      this.wordCacheCtx.clearRect(0, 0, this.wordCacheCanvas.width, this.wordCacheCanvas.height);
+      this.wordCacheCtx.save();
+      this.wordCacheCtx.scale(pixelRatio, pixelRatio);
+      this.wordCacheCtx.font = font;
+      this.wordCacheCtx.textBaseline = "top";
+      this.wordCacheCtx.fillStyle = "#FFFFFF";
+      words.forEach(w => this.wordCacheCtx.fillText(w.text, w.x, 0));
+      this.wordCacheCtx.restore();
+
+      const waveStart = effectiveCursor - WAVE_EXTENT;
+      const waveEnd = effectiveCursor + WAVE_EXTENT;
+      const srcLineHeight = lineH * pixelRatio;
+
+      // A. Past Chunk (Fully Lifted)
+      if (waveStart > 0) {
+          const w = Math.min(waveStart, lineW);
+          this.ctx.save();
+          this.ctx.drawImage(
+              this.wordCacheCanvas,
+              0, 0, w * pixelRatio, srcLineHeight,
+              0, lineY + MAX_LIFT, w, lineH
+          );
+          this.ctx.restore();
+      }
+
+      // B. Wave Chunk (Sliced & Distorted)
+      const startX = Math.max(0, waveStart);
+      const endX = Math.min(lineW, waveEnd);
+      
+      if (endX > startX) {
+          const SLICE_W = 2;
+          let sliceStart = startX;
+
+          while (sliceStart < endX) {
+              const sliceEnd = Math.min(endX, sliceStart + SLICE_W);
+              const drawW = sliceEnd - sliceStart;
+
+              if (drawW <= 0) break;
+
+              // Lift Calculation
+              const midPoint = sliceStart + drawW / 2;
+              const charDist = midPoint - effectiveCursor;
+              const sigmoid = 1 / (1 + Math.exp(SLOPE_STEEPNESS * charDist));
+              const lift = MAX_LIFT * sigmoid;
+
+              // Alpha/Gradient Calculation
+              const gradDist = midPoint - cursorX;
+              let alpha = 1.0;
+              if (gradDist >= 60) {
+                  alpha = 0.5;
+              } else if (gradDist > 0) {
+                  alpha = 1.0 - (gradDist / 60) * 0.5;
+              }
+
+              this.ctx.globalAlpha = alpha;
+              this.ctx.drawImage(
+                  this.wordCacheCanvas,
+                  sliceStart * pixelRatio,
+                  0,
+                  drawW * pixelRatio,
+                  srcLineHeight,
+                  sliceStart,
+                  lineY + lift,
+                  drawW,
+                  lineH
+              );
+
+              sliceStart = sliceEnd;
+          }
+
+          this.ctx.globalAlpha = 1.0;
+      }
+
+      // C. Future Chunk (Flat, Dim)
+      if (waveEnd < lineW) {
+          const start = Math.max(0, waveEnd);
+          const w = lineW - start;
+          if (w > 0) {
+              this.ctx.save();
+              this.ctx.globalAlpha = 0.5;
+              this.ctx.drawImage(
+                  this.wordCacheCanvas,
+                  start * pixelRatio, 0, w * pixelRatio, srcLineHeight,
+                  start, lineY, w, lineH
+              );
+              this.ctx.restore();
+          }
+      }
+  }
+
+  private easeProgress(word: WordLayout, target: number) {
+    if (word.renderProgress === undefined) {
+      word.renderProgress = target;
+    } else {
+      // Use exponential smoothing with adaptive rate
+      // Faster response when far from target, slower when close (spring-like behavior)
+      const delta = target - word.renderProgress;
+      const adaptiveRate = 0.15 + Math.abs(delta) * 0.2;
+      word.renderProgress += delta * Math.min(adaptiveRate, 0.4);
+    }
+    return Math.max(0, Math.min(1, word.renderProgress));
+  }
+
+  /**
+   * Compute spring-based breathing envelope using critically damped spring physics.
+   */
+  private computeBreathEnvelope(
+    progress: number,
+    isTransitioning: boolean,
+    transitionProgress: number
+  ): number {
+    // Envelope mostly handles the "Attack" phase of the word.
+    // Sustain and Release are handled by the wave and decay logic in drawGlowAnimation.
+    const attackEnd = 0.2;
+    if (progress < attackEnd) {
+      const t = progress / attackEnd;
+      // Ease out cubic for smooth entry
+      return 1 - Math.pow(1 - t, 3);
+    }
+    return 1;
+  }
+
+  /**
+   * Compute wave-based character activation using physics wave propagation.
+   */
+  private computeWaveActivation(
+    charIndex: number,
+    charCount: number,
+    progress: number
+  ): { activation: number; waveIntensity: number } {
+    const { wavelength } = WAVE_PHYSICS;
+
+    // Wave front position
+    const waveFront =
+      progress * (charCount + wavelength * 1.5) - wavelength * 0.5;
+
+    const distFromFront = charIndex - waveFront;
+
+    // Gaussian wave packet for intensity (flash)
+    const sigma = wavelength / 2.5;
+    const waveIntensity = Math.exp(
+      -(distFromFront * distFromFront) / (2 * sigma * sigma)
+    );
+
+    // Activation: 1 if wave has passed (swept area)
+    let activation = 0;
+    if (distFromFront < -wavelength * 0.5) {
+      activation = 1;
+    } else if (distFromFront > wavelength) {
+      activation = 0;
+    } else {
+      // Smooth hermite interpolation
+      const t = (-distFromFront + wavelength) / (1.5 * wavelength);
+      activation = Math.max(0, Math.min(1, t * t * (3 - 2 * t)));
+    }
+
+    return { activation, waveIntensity };
+  }
+
+  /**
+   * Draw glow effect - single layer
+   */
+  private applyGlow(intensity: number, color: string = "white") {
+    if (intensity < 0.01) {
+      this.ctx.shadowBlur = 0;
+      this.ctx.shadowColor = "transparent";
+      return;
+    }
+
+    // Non-linear blur for "fluid" feel
+    const blur = GLOW_CONFIG.blur * (0.4 + 0.6 * Math.pow(intensity, 0.8));
+    const alpha = GLOW_CONFIG.intensity * intensity;
+    this.ctx.shadowColor = `rgba(255, 255, 255, ${alpha})`;
+    this.ctx.shadowBlur = blur;
+  }
+
+  private drawGlowAnimation(
+    word: WordLayout,
+    elapsed: number,
+    duration: number,
+    decayFactor: number
+  ) {
+    const chars = word.text.split("");
+
+    if (chars.length === 0) return;
+    const charCount = chars.length;
+    const progress = Math.max(0, Math.min(1, elapsed / duration));
+    const { main, mainHeight } = getFonts(this.isMobile);
+
+    // Prepare character metrics
+    if (!word.charWidths || !word.charOffsets) {
+      const { charWidths, charOffsets } = this.computeCharMetrics(
+        word.text,
+        mainHeight
+      );
+
+      word.charWidths = charWidths;
+      word.charOffsets = charOffsets;
+    }
+
+    // --- CACHING LOGIC ---
+    // Render the full word once to an offscreen canvas if not already cached
+    if (this.cachedWordKey !== word.text) {
+      const padding = 20;
+      const requiredWidth = Math.ceil(word.width * this.pixelRatio) + padding;
+      const requiredHeight = Math.ceil(mainHeight * 1.5 * this.pixelRatio);
+
+      if (
+        this.wordCacheCanvas.width < requiredWidth ||
+        this.wordCacheCanvas.height < requiredHeight
+      ) {
+        this.wordCacheCanvas.width = requiredWidth;
+        this.wordCacheCanvas.height = requiredHeight;
+      }
+
+      this.wordCacheCtx.clearRect(
+        0,
+        0,
+        this.wordCacheCanvas.width,
+        this.wordCacheCanvas.height
+      );
+      this.wordCacheCtx.save();
+      this.wordCacheCtx.scale(this.pixelRatio, this.pixelRatio);
+      this.wordCacheCtx.font = main;
+      this.wordCacheCtx.textBaseline = "top";
+      this.wordCacheCtx.fillStyle = "#FFFFFF";
+      this.wordCacheCtx.fillText(word.text, 0, 0);
+      this.wordCacheCtx.restore();
+
+      this.cachedWordKey = word.text;
+    }
+
+    // --- FLUID GRID CALCULATION ---
+
+    const charScales: number[] = [];
+    const charOpacities: number[] = [];
+
+    let totalDynamicWidth = 0;
+
+    // 1. Compute scales and dynamics for all characters
+    chars.forEach((char, charIndex) => {
+      const { activation, waveIntensity } = this.computeWaveActivation(
+        charIndex,
+        charCount,
+        progress
+      );
+
+      // Scale Logic:
+      // Base Scale = 1.0 (Both sung and unsung)
+      // Peak Scale = GLOW_CONFIG.scaleBoost (At the wave front)
+      const BASE_SCALE = 1.0;
+      const PEAK_SCALE = GLOW_CONFIG.scaleBoost;
+
+      // Only boost at the wave peak
+      const waveBoost = (PEAK_SCALE - BASE_SCALE) * waveIntensity;
+      
+      const targetScale = BASE_SCALE + waveBoost;
+      
+      // Apply decay factor (fade out entire effect at end of word)
+      // For scale, we decay back to 1.0
+      const scale = 1 + (targetScale - 1) * decayFactor;
+
+      charScales.push(scale);
+
+      const originalWidth = word.charWidths?.[charIndex] ?? 0;
+      totalDynamicWidth += originalWidth * scale;
+
+      const opacity = 0.5 + 0.5 * activation;
+
+      charOpacities.push(opacity);
+    });
+
+    // 2. Calculate centering offset with dynamic bias
+    // The "anchor" shifts from left (0.3) to right (0.7) as progress increases
+    // This makes the expansion feel like it follows the reading cursor
+    const anchor = 0.5 + (progress - 0.5) * 0.5;
+    const originalWordWidth = word.width;
+    const widthDiff = totalDynamicWidth - originalWordWidth;
+    const startXOffset = -widthDiff * anchor;
+
+    // 3. Draw characters using cached slices
+
+    this.ctx.clearRect(0, -mainHeight * 0.5, word.width, mainHeight * 2);
+
+    let currentX = startXOffset;
+
+    this.applyGlow(decayFactor);
+
+    chars.forEach((char, charIndex) => {
+      const scale = charScales[charIndex];
+      const originalWidth = word.charWidths?.[charIndex] ?? 0;
+      const originalOffset = word.charOffsets?.[charIndex] ?? 0;
+      const dynamicWidth = originalWidth * scale;
+      const opacity = charOpacities[charIndex];
+
+      if (opacity > 0.01) {
+        this.ctx.save();
+
+        // Calculate vertical lift based on activation (float effect)
+        // We re-calculate activation here or store it? Storing is better but re-calc is cheap.
+        const { activation } = this.computeWaveActivation(
+          charIndex,
+          charCount,
+          progress
+        );
+        const lift = -mainHeight * 0.12 * activation * decayFactor;
+
+        // Apply opacity
+        this.ctx.globalAlpha = opacity;
+
+        // Position: Center of the dynamic slot
+        const charCenterX = currentX + dynamicWidth / 2;
+        const charCenterY = mainHeight / 2 + lift;
+
+        // Translate to center, scale, translate back
+        this.ctx.translate(charCenterX, charCenterY);
+        this.ctx.scale(scale, scale);
+        this.ctx.translate(-charCenterX, -charCenterY);
+
+        // Draw slice from cache
+        const sx = originalOffset * this.pixelRatio;
+        const sy = 0;
+        const sWidth = originalWidth * this.pixelRatio;
+        const sHeight = this.wordCacheCanvas.height;
+
+        if (sWidth > 0) {
+          this.ctx.drawImage(
+            this.wordCacheCanvas,
+            sx,
+            sy,
+            sWidth,
+            sHeight,
+            currentX,
+            lift, // Apply lift to Y position as well
+            originalWidth,
+            sHeight / this.pixelRatio
+          );
+        }
+
+        this.ctx.restore();
+      }
+
+      currentX += dynamicWidth;
+    });
+  }
+
+  private roundRect(x: number, y: number, w: number, h: number, r: number) {
+    if (w < 2 * r) r = w / 2;
+    if (h < 2 * r) r = h / 2;
+    this.ctx.beginPath();
+    this.ctx.moveTo(x + r, y);
+    this.ctx.arcTo(x + w, y, x + w, y + h, r);
+    this.ctx.arcTo(x + w, y + h, x, y + h, r);
+    this.ctx.arcTo(x, y + h, x, y, r);
+    this.ctx.arcTo(x, y, x + w, y, r);
+    this.ctx.closePath();
+  }
+
   public measure(containerWidth: number, suggestedTranslationWidth?: number) {
-    const { main, trans, mainHeight, transHeight } = getFonts(this.isMobile);
+    const { main, trans, mainHeight, transHeight } = getFonts(
+      this.isMobile
+    );
+
     const baseSize = this.isMobile ? 32 : 40;
     const paddingY = 18;
     const paddingX = this.isMobile ? 24 : 56;
@@ -268,10 +658,10 @@ export class LyricLine implements ILyricLine {
     // Reset context font for measurement
     this.ctx.font = main;
     this.ctx.textBaseline = "top";
-
     const lang = detectLanguage(this.lyricLine.text);
 
     // @ts-ignore: Intl.Segmenter
+
     const segmenter =
       typeof Intl !== "undefined" && Intl.Segmenter
         ? new Intl.Segmenter(lang, { granularity: "word" })
@@ -291,6 +681,7 @@ export class LyricLine implements ILyricLine {
       mainHeight,
       paddingY,
       mainFont: main,
+      wrapLineGap: mainHeight * WRAPPED_LINE_GAP_RATIO,
     });
 
     let blockHeight = lineHeight;
@@ -303,8 +694,14 @@ export class LyricLine implements ILyricLine {
       // Otherwise use textWidth (if > 0) or maxWidth
       let translationWrapWidth = textWidth > 0 ? textWidth : maxWidth;
 
-      if (suggestedTranslationWidth && suggestedTranslationWidth > translationWrapWidth) {
-        translationWrapWidth = Math.min(suggestedTranslationWidth, maxWidth);
+      if (
+        suggestedTranslationWidth &&
+        suggestedTranslationWidth > translationWrapWidth
+      ) {
+        translationWrapWidth = Math.min(
+          suggestedTranslationWidth,
+          maxWidth
+        );
       }
 
       const translationResult = this.measureTranslationLines({
@@ -334,10 +731,12 @@ export class LyricLine implements ILyricLine {
     };
 
     // Store logical dimensions
+
     this.logicalWidth = containerWidth;
     this.logicalHeight = blockHeight;
 
     // Set canvas physical resolution for HiDPI displays
+
     this.canvas.width = containerWidth * this.pixelRatio;
     this.canvas.height = blockHeight * this.pixelRatio;
 
@@ -364,7 +763,10 @@ export class LyricLine implements ILyricLine {
       this.lastIsHovered === isHovered;
     if (stateUnchanged) return;
 
-    const { main, trans, mainHeight, transHeight } = getFonts(this.isMobile);
+    const { main, trans, mainHeight, transHeight } = getFonts(
+      this.isMobile
+    );
+
     const paddingX = this.isMobile ? 24 : 56;
     const hasTimedWords = this.layout.words.some((w) => w.isVerbatim);
 
@@ -372,31 +774,9 @@ export class LyricLine implements ILyricLine {
       this.lastIsActive !== isActive || this.lastIsHovered !== isHovered;
 
     // Interludes need continuous redraw when active for smooth animation
+
     if (isActive && !hasTimedWords && !this.isDirty && !stateChanged) {
       return;
-    }
-
-    const canIncremental =
-      !this.isDirty && isActive && hasTimedWords && !stateChanged;
-
-    let snapshots: Map<WordLayout, WordRenderSnapshot> | undefined;
-    if (canIncremental) {
-      snapshots = new Map<WordLayout, WordRenderSnapshot>();
-      let needsWordUpdate = false;
-      this.layout.words.forEach((word) => {
-        const snapshot = this.computeWordSnapshot(word, currentTime);
-        snapshots!.set(word, snapshot);
-        if (!needsWordUpdate) {
-          needsWordUpdate = this.shouldRedrawWord(word, snapshot, currentTime);
-        }
-      });
-
-      if (!needsWordUpdate) {
-        this.lastIsActive = isActive;
-        this.lastIsHovered = isHovered;
-        this.isDirty = false;
-        return;
-      }
     }
 
     this.drawFullLine({
@@ -409,15 +789,12 @@ export class LyricLine implements ILyricLine {
       mainHeight,
       transHeight,
       paddingX,
-      snapshots,
     });
 
     this.lastIsActive = isActive;
     this.lastIsHovered = isHovered;
     this.isDirty = false;
   }
-
-
 
   public getCanvas() {
     return this.canvas;
@@ -454,6 +831,7 @@ export class LyricLine implements ILyricLine {
     mainHeight,
     paddingY,
     mainFont,
+    wrapLineGap,
   }: any) {
     this.ctx.font = mainFont;
 
@@ -466,7 +844,7 @@ export class LyricLine implements ILyricLine {
       text: string,
       start: number,
       end: number,
-      isVerbatim: boolean,
+      isVerbatim: boolean
     ) => {
       const metrics = this.ctx.measureText(text);
       let width = metrics.width;
@@ -476,12 +854,12 @@ export class LyricLine implements ILyricLine {
 
       if (currentLineX + width > maxWidth && currentLineX > 0) {
         currentLineX = 0;
-        currentLineY += mainHeight;
+        currentLineY += mainHeight + wrapLineGap;
       }
 
       const { charWidths, charOffsets } = this.computeCharMetrics(
         text,
-        baseSize,
+        baseSize
       );
 
       words.push({
@@ -539,14 +917,16 @@ export class LyricLine implements ILyricLine {
     this.ctx.font = transFont;
     const isEn = detectLanguage(translation) === "en";
     const atoms = isEn ? translation.split(" ") : translation.split("");
-
     const lines: string[] = [];
+
     let currentTransLine = "";
     let currentTransWidth = 0;
     let maxLineWidth = 0;
 
     atoms.forEach((atom: string, index: number) => {
-      const atomText = isEn && index < atoms.length - 1 ? atom + " " : atom;
+      const atomText =
+        isEn && index < atoms.length - 1 ? atom + " " : atom;
+
       const width = this.ctx.measureText(atomText).width;
 
       if (currentTransWidth + width > maxWidth && currentTransWidth > 0) {
@@ -572,389 +952,6 @@ export class LyricLine implements ILyricLine {
     };
   }
 
-  private drawLyricWord(word: WordLayout, currentTime: number) {
-    this.ctx.save();
-    this.ctx.translate(word.x, word.y);
-
-    const duration = word.endTime - word.startTime;
-    const elapsed = currentTime - word.startTime;
-    const { mainHeight } = getFonts(this.isMobile);
-
-    if (currentTime < word.startTime) {
-      this.ctx.fillStyle = "rgba(255, 255, 255, 0.5)";
-      this.ctx.fillText(word.text, 0, 0);
-      word.renderProgress = 0;
-      this.ctx.restore();
-      return;
-    } else if (currentTime > word.endTime) {
-      word.renderProgress = 1;
-      this.drawStandardAnimation(word, 1, duration, mainHeight);
-      this.ctx.restore();
-      return;
-    } else {
-      let progress = 0;
-      if (duration > 0) {
-        progress = Math.max(0, Math.min(1, elapsed / duration));
-      }
-      const easedProgress = this.easeProgress(word, progress);
-
-      const useGlow = this.shouldUseGlow(word, duration);
-      if (useGlow) {
-        this.drawGlowAnimation(word, currentTime, elapsed, duration);
-      } else {
-        this.drawStandardAnimation(word, easedProgress, duration, mainHeight);
-      }
-    }
-
-    this.ctx.restore();
-  }
-
-  /**
-   * Compute spring-based breathing envelope using critically damped spring physics.
-   * This creates the natural "breath" feel with optional subtle overshoot.
-   */
-  private computeBreathEnvelope(
-    progress: number,
-    isTransitioning: boolean,
-    transitionProgress: number,
-  ): number {
-    // Use a spring-inspired envelope: fast rise, natural decay
-    // Formula: x(t) = 1 - (1 + ωt)e^(-ωt) for critically damped rise
-    // Modified to create breathing pattern with overshoot
-
-    const { overshootFactor } = BREATH_PHYSICS;
-
-    // Phase 1: Attack (0 -> peak with overshoot)
-    // Phase 2: Sustain at peak
-    // Phase 3: Release (peak -> 0)
-
-    const attackEnd = 0.25;
-    const sustainEnd = 0.7;
-
-    let envelope = 0;
-
-    if (progress < attackEnd) {
-      // Attack phase: Spring-like rise with overshoot
-      const t = progress / attackEnd;
-      // Critically damped response with overshoot
-      const omega = 8; // Natural frequency
-      const dampedT = t * 3; // Scale for faster response
-      const springResponse =
-        1 - (1 + omega * dampedT) * Math.exp(-omega * dampedT);
-      // Add overshoot at the peak of attack
-      const overshoot =
-        Math.sin(t * Math.PI) * (overshootFactor - 1) * springResponse;
-      envelope = springResponse + overshoot;
-    } else if (progress < sustainEnd) {
-      // Sustain phase: Gentle breathing oscillation
-      const sustainT = (progress - attackEnd) / (sustainEnd - attackEnd);
-      // Subtle sine wave for "breathing" feel
-      const breathOscillation = Math.sin(sustainT * Math.PI * 2) * 0.08;
-      envelope = 1 + breathOscillation;
-    } else {
-      // Release phase: Smooth exponential decay
-      const releaseT = (progress - sustainEnd) / (1 - sustainEnd);
-      // Exponential decay for natural release
-      envelope = Math.exp(-releaseT * 3);
-    }
-
-    // Apply transition fade-out with physics-based deceleration
-    if (isTransitioning) {
-      // Use spring-based deceleration curve
-      const decel = 1 - Math.pow(transitionProgress, 2) * (3 - 2 * transitionProgress);
-      envelope *= decel;
-    }
-
-    return Math.max(0, Math.min(1.2, envelope));
-  }
-
-  /**
-   * Compute wave-based character activation using physics wave propagation.
-   * Creates the smooth left-to-right highlight sweep.
-   */
-  private computeWaveActivation(
-    charIndex: number,
-    charCount: number,
-    progress: number,
-  ): { activation: number; waveIntensity: number } {
-    const { speed, decay, wavelength } = WAVE_PHYSICS;
-
-    // Wave front position (0 to charCount)
-    const waveFront = progress * (charCount + wavelength * 2) - wavelength;
-
-    // Distance from wave front
-    const distFromFront = charIndex - waveFront;
-
-    // Gaussian wave packet for smooth activation
-    const sigma = wavelength / 2;
-    const wavePacket = Math.exp(
-      -(distFromFront * distFromFront) / (2 * sigma * sigma),
-    );
-
-    // Activation: 1 if wave has passed, smooth transition at front
-    let activation = 0;
-    if (distFromFront < -wavelength) {
-      activation = 1;
-    } else if (distFromFront > wavelength) {
-      activation = 0;
-    } else {
-      // Smooth step using hermite interpolation
-      const t = (-distFromFront + wavelength) / (2 * wavelength);
-      activation = t * t * (3 - 2 * t);
-    }
-
-    // Wave intensity for glow effect (peaks at wave front)
-    const waveIntensity = wavePacket * Math.pow(decay, Math.abs(distFromFront));
-
-    return { activation, waveIntensity };
-  }
-
-  /**
-   * Draw glow effect - single layer to avoid multiple shadows
-   */
-  private applyGlow(intensity: number) {
-    if (intensity < 0.01) {
-      this.ctx.shadowBlur = 0;
-      this.ctx.shadowColor = "transparent";
-      return;
-    }
-    const blur = GLOW_CONFIG.blur * (0.5 + 0.5 * intensity);
-    const alpha = GLOW_CONFIG.intensity * intensity;
-    this.ctx.shadowColor = `rgba(255, 255, 255, ${alpha})`;
-    this.ctx.shadowBlur = blur;
-  }
-
-  private drawGlowAnimation(
-    word: WordLayout,
-    currentTime: number,
-    elapsed: number,
-    duration: number,
-  ) {
-    const chars = word.text.split("");
-    if (chars.length === 0) {
-      this.ctx.fillText(word.text, 0, 0);
-      return;
-    }
-
-    const charCount = chars.length;
-
-    // Calculate effective duration based on character count
-    const baseTimePerChar =
-      charCount <= 3 ? 0.28 : charCount <= 5 ? 0.22 : 0.16;
-    const MAX_GLOW_DURATION = Math.max(1.2, charCount * baseTimePerChar);
-    const effectiveDuration = Math.min(duration, MAX_GLOW_DURATION);
-    const TRANSITION_DURATION = 0.35;
-
-    const isAnimating = elapsed < effectiveDuration;
-    const isTransitioning =
-      elapsed >= effectiveDuration &&
-      elapsed < effectiveDuration + TRANSITION_DURATION;
-
-    // Calculate animation progress
-    let effectiveP = 0;
-    if (effectiveDuration > 0) {
-      const rawP = Math.max(0, Math.min(1, elapsed / effectiveDuration));
-      effectiveP = 1 - Math.pow(1 - rawP, 2.5);
-    }
-    if (!isAnimating && !isTransitioning) effectiveP = 1;
-
-    // Calculate transition progress
-    let transitionProgress = 0;
-    if (isTransitioning) {
-      transitionProgress = (elapsed - effectiveDuration) / TRANSITION_DURATION;
-    }
-
-    // Compute physics-based breathing envelope
-    const breathEnvelope = this.computeBreathEnvelope(
-      Math.min(1, effectiveP),
-      isTransitioning,
-      transitionProgress,
-    );
-
-    // Calculate breath lift using spring physics
-    const baseLift =
-      charCount <= 3
-        ? BREATH_PHYSICS.liftAmountShort
-        : charCount <= 5
-          ? BREATH_PHYSICS.liftAmountMedium
-          : BREATH_PHYSICS.liftAmountLong;
-    const breathLift = baseLift * breathEnvelope;
-
-    // Prepare character metrics
-    if (!word.charWidths || !word.charOffsets) {
-      const { charWidths, charOffsets } = this.computeCharMetrics(
-        word.text,
-        getFonts(this.isMobile).mainHeight,
-      );
-      word.charWidths = charWidths;
-      word.charOffsets = charOffsets;
-    }
-
-    const { mainHeight } = getFonts(this.isMobile);
-
-    // Draw base text layer (dim inactive layer) - NO glow here
-    this.ctx.save();
-    this.ctx.shadowBlur = 0;
-    this.ctx.shadowColor = "transparent";
-    this.ctx.fillStyle = `rgba(255, 255, 255, ${0.30 + 0.15 * breathEnvelope})`;
-    this.ctx.fillText(word.text, 0, 0);
-    this.ctx.restore();
-
-    // Draw individual characters with wave activation, glow, and scale
-    chars.forEach((char, charIndex) => {
-      const charX = word.charOffsets?.[charIndex] ?? 0;
-      const charWidth = word.charWidths?.[charIndex] ?? this.ctx.measureText(char).width;
-
-      // Compute wave-based activation
-      const { activation, waveIntensity } = this.computeWaveActivation(
-        charIndex,
-        charCount,
-        effectiveP,
-      );
-
-      // Combine activation with breathing envelope
-      const combinedIntensity = Math.max(activation, waveIntensity * breathEnvelope);
-      const brightness = 0.40 + combinedIntensity * 0.60;
-
-      // Calculate per-character scale based on wave intensity
-      const charScale = 1 + (GLOW_CONFIG.scaleBoost - 1) * waveIntensity * breathEnvelope;
-      // Per-character lift (wave front lifts more)
-      const charLift = breathLift * (0.6 + 0.4 * waveIntensity);
-
-      this.ctx.save();
-
-      // Transform from character center for scale
-      const charCenterX = charX + charWidth / 2;
-      const charCenterY = mainHeight / 2;
-
-      this.ctx.translate(charCenterX, charCenterY);
-      this.ctx.scale(charScale, charScale);
-      this.ctx.translate(-charCenterX, -charCenterY - charLift);
-
-      // Apply glow based on wave intensity (glow follows the wave front)
-      const glowIntensity = waveIntensity * breathEnvelope;
-      this.applyGlow(glowIntensity);
-
-      // Draw character with appropriate brightness
-      this.ctx.fillStyle =
-        activation > 0.95
-          ? "#ffffff"
-          : `rgba(255, 255, 255, ${Math.min(1, brightness)})`;
-      this.ctx.fillText(char, charX, 0);
-
-      this.ctx.restore();
-    });
-
-    // Clean up shadow state
-    this.ctx.shadowBlur = 0;
-    this.ctx.shadowColor = "transparent";
-  }
-
-  private drawStandardAnimation(
-    word: WordLayout,
-    progress: number,
-    duration: number,
-    mainHeight: number,
-  ) {
-    // Dim color must match the inactive word color (0.5 opacity)
-    const dimColor = "rgba(255, 255, 255, 0.5)";
-
-    // If animation is complete, draw the full word with subtle float
-    if (progress >= 1) {
-      this.ctx.save();
-      this.ctx.fillStyle = "#ffffff";
-      this.ctx.fillText(word.text, 0, -1.5);
-      this.ctx.restore();
-      return;
-    }
-
-    const highlightX = word.width * progress;
-    // Gradient transition zone - larger, extending more into dim area
-    const transitionZone = Math.min(48, word.width * 0.35);
-
-    // Subtle lift: smooth ease-out curve
-    const liftAmount = -1.8;
-    const liftProgress = 1 - Math.pow(1 - progress, 2);
-    const lift = liftAmount * liftProgress;
-
-    this.ctx.save();
-    this.ctx.translate(0, lift);
-
-    // Transition zone: starts slightly before current position, extends further into dim area
-    const gradientStart = Math.max(0, highlightX - transitionZone * 0.3);
-    const gradientEnd = Math.min(word.width, highlightX + transitionZone * 0.7);
-
-    // Create gradient: white (left) -> dim (right)
-    const revealGradient = this.ctx.createLinearGradient(
-      gradientStart,
-      0,
-      gradientEnd,
-      0,
-    );
-    revealGradient.addColorStop(0, "#ffffff");
-    revealGradient.addColorStop(1, dimColor);
-
-    // Draw fully highlighted portion (left of transition zone)
-    if (gradientStart > 0) {
-      this.ctx.save();
-      this.ctx.beginPath();
-      this.ctx.rect(-2, -mainHeight * 0.3, gradientStart + 2, mainHeight * 1.5);
-      this.ctx.clip();
-      this.ctx.fillStyle = "#ffffff";
-      this.ctx.fillText(word.text, 0, 0);
-      this.ctx.restore();
-    }
-
-    // Draw the gradient transition zone
-    this.ctx.save();
-    this.ctx.beginPath();
-    this.ctx.rect(gradientStart, -mainHeight * 0.3, gradientEnd - gradientStart, mainHeight * 1.5);
-    this.ctx.clip();
-    this.ctx.fillStyle = revealGradient;
-    this.ctx.fillText(word.text, 0, 0);
-    this.ctx.restore();
-
-    // Draw dim portion (right of transition zone)
-    if (gradientEnd < word.width) {
-      this.ctx.save();
-      this.ctx.beginPath();
-      this.ctx.rect(gradientEnd, -mainHeight * 0.3, word.width - gradientEnd + 2, mainHeight * 1.5);
-      this.ctx.clip();
-      this.ctx.fillStyle = dimColor;
-      this.ctx.fillText(word.text, 0, 0);
-      this.ctx.restore();
-    }
-
-    // Add subtle glow at the current playback position
-    const cursorGlowIntensity = 0.2;
-    this.ctx.save();
-    this.ctx.shadowColor = `rgba(255, 255, 255, ${cursorGlowIntensity})`;
-    this.ctx.shadowBlur = 6;
-    this.ctx.beginPath();
-    this.ctx.rect(highlightX - 3, 0, 6, mainHeight * 0.8);
-    this.ctx.clip();
-    this.ctx.fillStyle = "rgba(255, 255, 255, 0.4)";
-    this.ctx.fillText(word.text, 0, 0);
-    this.ctx.restore();
-
-    // Clean up
-    this.ctx.shadowBlur = 0;
-    this.ctx.shadowColor = "transparent";
-    this.ctx.restore();
-  }
-
-  private roundRect(x: number, y: number, w: number, h: number, r: number) {
-    if (w < 2 * r) r = w / 2;
-    if (h < 2 * r) r = h / 2;
-    this.ctx.beginPath();
-    this.ctx.moveTo(x + r, y);
-    this.ctx.arcTo(x + w, y, x + w, y + h, r);
-    this.ctx.arcTo(x + w, y + h, x, y + h, r);
-    this.ctx.arcTo(x, y + h, x, y, r);
-    this.ctx.arcTo(x, y, x + w, y, r);
-    this.ctx.closePath();
-  }
-
   private computeCharMetrics(text: string, baseSize: number) {
     const chars = text.split("");
     const charWidths: number[] = [];
@@ -970,26 +967,5 @@ export class LyricLine implements ILyricLine {
     });
 
     return { charWidths, charOffsets };
-  }
-
-  private easeProgress(word: WordLayout, target: number) {
-    if (word.renderProgress === undefined) {
-      word.renderProgress = target;
-    } else {
-      // Use exponential smoothing with adaptive rate
-      // Faster response when far from target, slower when close (spring-like behavior)
-      const delta = target - word.renderProgress;
-      const adaptiveRate = 0.15 + Math.abs(delta) * 0.2;
-      word.renderProgress += delta * Math.min(adaptiveRate, 0.4);
-    }
-    return Math.max(0, Math.min(1, word.renderProgress));
-  }
-
-  /**
-   * Attempt to remove easeInOutCubic to clean up unused code.
-   * The physics-based animations now use spring mechanics directly.
-   */
-  private easeInOutCubic(t: number): number {
-    return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
   }
 }

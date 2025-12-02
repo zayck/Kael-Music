@@ -306,9 +306,8 @@ const LyricsView: React.FC<LyricsViewProps> = ({
 
       const drift = targetTime - visualTime;
       // Exponential smoothing to catch up to target time
-      // tau = 0.12s means ~63% of drift corrected within 120ms
       // Balances smoothness with responsiveness
-      const tau = 0.2;
+      const tau = 0.35;
       const smoothing = 1 - Math.exp(-dt / tau);
       visualTime += drift * smoothing;
     } else {
