@@ -97,15 +97,41 @@ export const mergePunctuation = (words: LyricWord[]): LyricWord[] => {
     if (words.length <= 1) return words;
 
     const result: LyricWord[] = [];
+    let leadingBuffer: LyricWord | null = null;
 
     for (const word of words) {
-        if (isPunctuation(word.text) && result.length > 0) {
-            const prev = result[result.length - 1];
-            prev.text += word.text;
-            prev.endTime = word.endTime;
-        } else {
-            result.push({ ...word });
+        if (isPunctuation(word.text)) {
+            if (result.length > 0) {
+                const prev = result[result.length - 1];
+                prev.text += word.text;
+                prev.endTime = word.endTime;
+            } else if (leadingBuffer) {
+                leadingBuffer = {
+                    ...leadingBuffer,
+                    text: `${leadingBuffer.text}${word.text}`,
+                    endTime: word.endTime,
+                };
+            } else {
+                leadingBuffer = { ...word };
+            }
+            continue;
         }
+
+        let mergedWord = { ...word };
+        if (leadingBuffer) {
+            mergedWord = {
+                ...mergedWord,
+                text: `${leadingBuffer.text}${mergedWord.text}`,
+                startTime: Math.min(leadingBuffer.startTime, mergedWord.startTime),
+            };
+            leadingBuffer = null;
+        }
+
+        result.push(mergedWord);
+    }
+
+    if (leadingBuffer) {
+        result.push(leadingBuffer);
     }
 
     return result;

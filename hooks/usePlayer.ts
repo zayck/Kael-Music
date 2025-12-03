@@ -709,7 +709,9 @@ export const usePlayer = ({
             return;
           }
           try {
-            sourceBuffer.appendBuffer(Buffer.from(next));
+            const arrayBuffer = new ArrayBuffer(next.byteLength);
+            new Uint8Array(arrayBuffer).set(next);
+            sourceBuffer.appendBuffer(arrayBuffer);
           } catch (error) {
             console.warn("Appending audio chunk failed:", error);
             chunkQueue.length = 0;

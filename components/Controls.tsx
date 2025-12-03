@@ -296,9 +296,12 @@ const Controls: React.FC<ControlsProps> = ({
     immediate: false,
   });
 
-  const normalizedBufferProgress = Math.max(0, Math.min(1, bufferProgress));
-  const bufferingPercent = Math.round(normalizedBufferProgress * 100);
-  const bufferedWidthPercent = isBuffering ? bufferingPercent : 0;
+  const normalizedBufferProgress = Number.isFinite(bufferProgress)
+    ? Math.max(0, Math.min(1, bufferProgress))
+    : 0;
+  const bufferedWidthPercent = isBuffering
+    ? Math.min(100, Math.max(0, Number((normalizedBufferProgress * 100).toFixed(2))))
+    : 0;
 
   return (
     <div className="w-full flex flex-col items-center justify-center gap-2 text-white select-none">
