@@ -49,7 +49,6 @@ const App: React.FC = () => {
     pause,
     resolvedAudioSrc,
     isBuffering,
-    bufferProgress,
   } = player;
 
   const [showPlaylist, setShowPlaylist] = useState(false);
@@ -263,7 +262,6 @@ const App: React.FC = () => {
           onTogglePreservesPitch={player.togglePreservesPitch}
           coverUrl={currentSong?.coverUrl}
           isBuffering={isBuffering}
-          bufferProgress={bufferProgress}
           showVolumePopup={showVolumePopup}
           setShowVolumePopup={setShowVolumePopup}
           showSettingsPopup={showSettingsPopup}

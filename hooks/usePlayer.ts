@@ -516,9 +516,6 @@ export const usePlayer = ({
     let canceled = false;
     let currentObjectUrl: string | null = null;
     let controller: AbortController | null = null;
-    let mediaSource: MediaSource | null = null;
-    let sourceBuffer: SourceBuffer | null = null;
-    let sourceUpdateHandler: (() => void) | null = null;
 
     const releaseObjectUrl = () => {
       if (currentObjectUrl) {
@@ -527,54 +524,21 @@ export const usePlayer = ({
       }
     };
 
-    const cleanupSourceBuffer = () => {
-      if (sourceBuffer && sourceUpdateHandler) {
-        try {
-          sourceBuffer.removeEventListener("updateend", sourceUpdateHandler);
-        } catch {
-          // Ignore cleanup errors
-        }
-      }
-      sourceBuffer = null;
-      sourceUpdateHandler = null;
-    };
-
-    const resetBuffering = () => {
-      if (canceled) return;
-      setIsBuffering(false);
-      setBufferProgress(0);
-    };
-
-    const fallbackToNativeSrc = () => {
-      cleanupSourceBuffer();
-      if (mediaSource && mediaSource.readyState === "open") {
-        try {
-          mediaSource.endOfStream();
-        } catch {
-          // ignore
-        }
-      }
-      mediaSource = null;
-      releaseObjectUrl();
-      if (!canceled) {
-        setResolvedAudioSrc(null);
-      }
-    };
-
     if (!currentSong?.fileUrl) {
       releaseObjectUrl();
       setResolvedAudioSrc(null);
-      resetBuffering();
+      setIsBuffering(false);
+      setBufferProgress(0);
       return () => {
         canceled = true;
         controller?.abort();
-        cleanupSourceBuffer();
         releaseObjectUrl();
       };
     }
 
     const fileUrl = currentSong.fileUrl;
 
+    // Already a blob or data URL - use directly
     if (fileUrl.startsWith("blob:") || fileUrl.startsWith("data:")) {
       releaseObjectUrl();
       setResolvedAudioSrc(fileUrl);
@@ -585,6 +549,7 @@ export const usePlayer = ({
       };
     }
 
+    // Check cache first
     const cachedBlob = audioResourceCache.get(fileUrl);
     if (cachedBlob) {
       releaseObjectUrl();
@@ -598,180 +563,20 @@ export const usePlayer = ({
       };
     }
 
-    const MediaSourceCtor =
-      typeof window !== "undefined" ? window.MediaSource : undefined;
-    const supportsMediaSource =
-      typeof MediaSourceCtor !== "undefined" &&
-      typeof MediaSourceCtor.isTypeSupported === "function";
-
+    // Use the original URL directly - let browser handle native buffering
+    // This is the most reliable approach and works for any file size
     releaseObjectUrl();
+    setResolvedAudioSrc(null); // Use original fileUrl via fallback in audio element
     setIsBuffering(true);
     setBufferProgress(0);
 
-    if (typeof fetch !== "function") {
-      resetBuffering();
-      return () => {
-        canceled = true;
-      };
-    }
+    // Download in background for caching (does not affect playback)
+    const cacheInBackground = async () => {
+      if (typeof fetch !== "function") return;
 
-    if (supportsMediaSource && MediaSourceCtor) {
-      mediaSource = new MediaSourceCtor();
-      currentObjectUrl = URL.createObjectURL(mediaSource);
-      setResolvedAudioSrc(currentObjectUrl);
-    } else {
-      setResolvedAudioSrc(null);
-    }
-
-    const waitForSourceOpen = () =>
-      new Promise<void>((resolve) => {
-        if (!mediaSource) {
-          resolve();
-          return;
-        }
-        if (mediaSource.readyState === "open") {
-          resolve();
-          return;
-        }
-        const handleOpen = () => {
-          mediaSource?.removeEventListener("sourceopen", handleOpen);
-          resolve();
-        };
-        mediaSource.addEventListener("sourceopen", handleOpen);
-      });
-
-    const streamViaMediaSource = async (signal: AbortSignal): Promise<boolean> => {
-      if (!mediaSource) return false;
+      controller = new AbortController();
       try {
-        const response = await fetch(fileUrl, { signal });
-        if (!response.ok) {
-          throw new Error("Failed to load audio: " + response.status);
-        }
-
-        if (!response.body) {
-          return false;
-        }
-
-        const headerType = response.headers.get("content-type") || "";
-        const baseMime = headerType.split(";")[0].trim() || "audio/mpeg";
-        const preferredMime = MediaSourceCtor?.isTypeSupported?.(baseMime)
-          ? baseMime
-          : MediaSourceCtor?.isTypeSupported?.("audio/mpeg")
-            ? "audio/mpeg"
-            : "";
-
-        if (!preferredMime) {
-          return false;
-        }
-
-        await waitForSourceOpen();
-        if (canceled) return true;
-
-        try {
-          sourceBuffer = mediaSource.addSourceBuffer(preferredMime);
-          sourceBuffer.mode = "sequence";
-        } catch (error) {
-          console.warn("Creating SourceBuffer failed:", error);
-          return false;
-        }
-
-        const chunkQueue: Uint8Array[] = [];
-        let streamFinished = false;
-        const cachedChunks: BlobPart[] = [];
-        const totalBytes = Number(response.headers.get("content-length")) || 0;
-        const reader = response.body.getReader();
-
-        const maybeCloseStream = () => {
-          if (
-            streamFinished &&
-            chunkQueue.length === 0 &&
-            mediaSource &&
-            mediaSource.readyState === "open" &&
-            sourceBuffer &&
-            !sourceBuffer.updating
-          ) {
-            try {
-              mediaSource.endOfStream();
-            } catch {
-              // ignore
-            }
-          }
-        };
-
-        const appendFromQueue = () => {
-          if (!sourceBuffer || sourceBuffer.updating || chunkQueue.length === 0) {
-            maybeCloseStream();
-            return;
-          }
-          const next = chunkQueue.shift();
-          if (!next) {
-            maybeCloseStream();
-            return;
-          }
-          try {
-            const arrayBuffer = new ArrayBuffer(next.byteLength);
-            new Uint8Array(arrayBuffer).set(next);
-            sourceBuffer.appendBuffer(arrayBuffer);
-          } catch (error) {
-            console.warn("Appending audio chunk failed:", error);
-            chunkQueue.length = 0;
-          }
-        };
-
-        sourceUpdateHandler = () => {
-          appendFromQueue();
-        };
-        sourceBuffer.addEventListener("updateend", sourceUpdateHandler);
-
-        let loaded = 0;
-        while (!canceled) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          if (value) {
-            const copy = value.slice();
-            chunkQueue.push(copy);
-            cachedChunks.push(copy);
-            loaded += copy.byteLength;
-            if (!canceled) {
-              if (totalBytes > 0) {
-                setBufferProgress(Math.min(loaded / totalBytes, 0.995));
-              } else {
-                setBufferProgress((prev) => {
-                  const increment = copy.byteLength / (5 * 1024 * 1024);
-                  return Math.min(0.95, prev + increment);
-                });
-              }
-            }
-            appendFromQueue();
-          }
-        }
-
-        streamFinished = true;
-        appendFromQueue();
-        maybeCloseStream();
-
-        if (canceled) {
-          return true;
-        }
-
-        const blob = new Blob(cachedChunks, {
-          type: baseMime || "audio/mpeg",
-        });
-        audioResourceCache.set(fileUrl, blob);
-        setBufferProgress(1);
-        return true;
-      } catch (error) {
-        if (!canceled) {
-          console.warn("Audio streaming failed:", error);
-          setBufferProgress(0);
-        }
-        return false;
-      }
-    };
-
-    const cacheWithoutStreaming = async (signal: AbortSignal) => {
-      try {
-        const response = await fetch(fileUrl, { signal });
+        const response = await fetch(fileUrl, { signal: controller.signal });
         if (!response.ok) {
           throw new Error("Failed to load audio: " + response.status);
         }
@@ -783,6 +588,7 @@ export const usePlayer = ({
           if (canceled) return;
           audioResourceCache.set(fileUrl, fallbackBlob);
           setBufferProgress(1);
+          // Don't switch - will be used next time
           return;
         }
 
@@ -794,14 +600,13 @@ export const usePlayer = ({
           const { done, value } = await reader.read();
           if (done) break;
           if (value) {
-            const copy = value.slice();
-            chunks.push(copy);
-            loaded += copy.byteLength;
+            chunks.push(value);
+            loaded += value.byteLength;
             if (totalBytes > 0) {
               setBufferProgress(Math.min(loaded / totalBytes, 0.99));
             } else {
               setBufferProgress((prev) => {
-                const increment = copy.byteLength / (5 * 1024 * 1024);
+                const increment = value.byteLength / (5 * 1024 * 1024);
                 return Math.min(0.95, prev + increment);
               });
             }
@@ -815,27 +620,12 @@ export const usePlayer = ({
         });
         audioResourceCache.set(fileUrl, blob);
         setBufferProgress(1);
+        // Don't switch to blob URL during playback - it would restart the audio
+        // The cached blob will be used automatically next time this song is played
       } catch (error) {
         if (!canceled) {
-          console.warn("Audio caching failed:", error);
-          setBufferProgress(0);
-        }
-      }
-    };
-
-    const start = async () => {
-      try {
-        if (supportsMediaSource) {
-          controller = new AbortController();
-          const streamed = await streamViaMediaSource(controller.signal);
-          if (!streamed && !canceled) {
-            fallbackToNativeSrc();
-            controller = new AbortController();
-            await cacheWithoutStreaming(controller.signal);
-          }
-        } else {
-          controller = new AbortController();
-          await cacheWithoutStreaming(controller.signal);
+          // Not critical - browser is still playing via native buffering
+          console.warn("Background audio caching failed:", error);
         }
       } finally {
         if (!canceled) {
@@ -844,19 +634,11 @@ export const usePlayer = ({
       }
     };
 
-    start();
+    cacheInBackground();
 
     return () => {
       canceled = true;
       controller?.abort();
-      cleanupSourceBuffer();
-      if (mediaSource && mediaSource.readyState === "open") {
-        try {
-          mediaSource.endOfStream();
-        } catch {
-          // ignore
-        }
-      }
       releaseObjectUrl();
     };
   }, [currentSong?.fileUrl]);

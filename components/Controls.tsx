@@ -49,7 +49,6 @@ interface ControlsProps {
   showSettingsPopup: boolean;
   setShowSettingsPopup: (show: boolean) => void;
   isBuffering: boolean;
-  bufferProgress: number;
 }
 
 const Controls: React.FC<ControlsProps> = ({
@@ -79,7 +78,6 @@ const Controls: React.FC<ControlsProps> = ({
   showSettingsPopup,
   setShowSettingsPopup,
   isBuffering,
-  bufferProgress,
 }) => {
   const volumeContainerRef = useRef<HTMLDivElement>(null);
   const settingsContainerRef = useRef<HTMLDivElement>(null);
@@ -109,6 +107,9 @@ const Controls: React.FC<ControlsProps> = ({
   // Interpolated time for smooth progress bar
   const [interpolatedTime, setInterpolatedTime] = useState(currentTime);
   const progressLastTimeRef = useRef(Date.now());
+
+  // Buffered time range from audio element
+  const [bufferedEnd, setBufferedEnd] = useState(0);
 
   useEffect(() => {
     if (isSeeking) return;
@@ -162,8 +163,57 @@ const Controls: React.FC<ControlsProps> = ({
     return () => cancelAnimationFrame(animationFrameId);
   }, [currentTime, isPlaying, isSeeking, speed, duration, isWaitingForSeek]);
 
-  // Use interpolated time for display, but sync to currentTime when it jumps significantly
-  // (handled by the useEffect above resetting on currentTime change)
+  // Update buffered time range from audio element
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    const updateBuffered = () => {
+      // Get the audio's actual duration (may differ from prop during loading)
+      const audioDuration = audio.duration;
+
+      if (audio.buffered.length > 0 && Number.isFinite(audioDuration) && audioDuration > 0) {
+        // Find the maximum buffered end time
+        let maxEnd = 0;
+        for (let i = 0; i < audio.buffered.length; i++) {
+          const end = audio.buffered.end(i);
+          if (end > maxEnd) {
+            maxEnd = end;
+          }
+        }
+        // Clamp to duration to prevent exceeding 100%
+        setBufferedEnd(Math.min(maxEnd, audioDuration));
+      } else {
+        setBufferedEnd(0);
+      }
+    };
+
+    // Reset buffered state when audio source changes
+    const handleEmptied = () => {
+      setBufferedEnd(0);
+    };
+
+    // Initial update
+    updateBuffered();
+
+    // Listen to various events for buffer updates
+    audio.addEventListener("progress", updateBuffered);
+    audio.addEventListener("loadeddata", updateBuffered);
+    audio.addEventListener("canplaythrough", updateBuffered);
+    audio.addEventListener("durationchange", updateBuffered);
+    audio.addEventListener("emptied", handleEmptied);
+    audio.addEventListener("loadstart", handleEmptied);
+
+    return () => {
+      audio.removeEventListener("progress", updateBuffered);
+      audio.removeEventListener("loadeddata", updateBuffered);
+      audio.removeEventListener("canplaythrough", updateBuffered);
+      audio.removeEventListener("durationchange", updateBuffered);
+      audio.removeEventListener("emptied", handleEmptied);
+      audio.removeEventListener("loadstart", handleEmptied);
+    };
+  }, [audioRef]);
+
   const displayTime = isSeeking ? seekTime : interpolatedTime;
 
   const [coverSpring, coverApi] = useSpring(() => ({
@@ -296,11 +346,9 @@ const Controls: React.FC<ControlsProps> = ({
     immediate: false,
   });
 
-  const normalizedBufferProgress = Number.isFinite(bufferProgress)
-    ? Math.max(0, Math.min(1, bufferProgress))
-    : 0;
-  const bufferedWidthPercent = isBuffering
-    ? Math.min(100, Math.max(0, Number((normalizedBufferProgress * 100).toFixed(2))))
+  // Calculate buffered percentage from actual audio buffered time
+  const bufferedWidthPercent = duration > 0
+    ? Math.min(100, Math.max(0, (bufferedEnd / duration) * 100))
     : 0;
 
   return (
