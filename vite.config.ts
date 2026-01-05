@@ -3,10 +3,23 @@ import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
 
 export default defineConfig(({ mode }) => {
-  const env = loadEnv(mode, '.', '');
-  const productionBase = env.VITE_BASE_PATH || '/Kael-music/';
+  const env = loadEnv(mode, '.', 'VITE_');
+  let basePath: string;
+  switch (mode) {
+    case 'production':
+      basePath = env.VITE_BASE_PATH || '/Kael-music/';
+      break;
+    case 'staging':
+      basePath = env.VITE_BASE_PATH || '/Kael-music-staging/';
+      break;
+    case 'development':
+    default:
+      basePath = '/';
+      break;
+  }
+  
   return {
-    base: mode === 'production' ? productionBase : '/',
+    base: basePath,
     server: {
       port: 3000,
       host: '0.0.0.0',
