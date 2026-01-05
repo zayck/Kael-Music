@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { createPortal } from "react-dom";
-import { LinkIcon } from "./Icons";
+import { CloudUploadIcon } from "./Icons";
 
 interface ImportMusicDialogProps {
   isOpen: boolean;
@@ -54,25 +54,25 @@ const ImportMusicDialog: React.FC<ImportMusicDialogProps> = ({
         {/* Content */}
         <div className="p-6 flex flex-col items-center text-center">
           <div className="w-14 h-14 rounded-full bg-blue-500/20 flex items-center justify-center mb-4 text-blue-400">
-            <LinkIcon className="w-7 h-7" />
+            <CloudUploadIcon className="w-7 h-7" />
           </div>
 
           <h3 className="text-xl font-bold text-white tracking-tight">
             Import Music
           </h3>
           <p className="text-white/60 text-[15px] mt-2 leading-relaxed px-2">
-            Paste a{" "}
+            Paste a song or playlist link from{" "}
             <span className="text-white/90 font-medium">
-              Netease Cloud Music
+              NetEase, QQ Music, Baidu Music, Kugou Music, or Xiami Music
             </span>{" "}
-            song or playlist link to add to queue.
+            to add to queue.
           </p>
 
           <input
             type="text"
             value={importUrl}
             onChange={(e) => setImportUrl(e.target.value)}
-            placeholder="https://music.163.com/..."
+            placeholder="https://music.163.com/... or https://y.qq.com/... or https://music.baidu.com/..."
             className="w-full mt-5 bg-white/10 border border-white/10 rounded-xl px-4 py-3.5 text-white placeholder:text-white/20 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:bg-white/10 transition-all text-[15px]"
             disabled={isLoading}
             autoFocus

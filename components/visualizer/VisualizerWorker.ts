@@ -16,7 +16,7 @@ export interface VisualizerConfig {
 
 const ctx: Worker = self as any;
 
-console.log("VisualizerWorker: Worker script loaded");
+
 
 let canvas: OffscreenCanvas | null = null;
 let canvasCtx: OffscreenCanvasRenderingContext2D | null = null;
@@ -31,20 +31,20 @@ let historyIndex = 0;
 
 ctx.onmessage = (e: MessageEvent<WorkerMessage>) => {
     const { type } = e.data;
-    console.log("VisualizerWorker: Received message", type);
+
 
     switch (type) {
         case 'INIT': {
             const payload = e.data as { type: 'INIT'; canvas: OffscreenCanvas; config: VisualizerConfig; port: MessagePort };
-            console.log("VisualizerWorker: Initializing...");
+
             canvas = payload.canvas;
             config = payload.config;
             canvasCtx = canvas.getContext('2d');
-            console.log("VisualizerWorker: Canvas context created", !!canvasCtx);
+
 
             // Setup port to worklet
             workletPort = payload.port;
-            console.log("VisualizerWorker: Port received");
+
             workletPort.onmessage = (ev) => {
                 if (ev.data.type === 'AUDIO_DATA') {
                     const newData = ev.data.data as Float32Array;
@@ -72,7 +72,7 @@ ctx.onmessage = (e: MessageEvent<WorkerMessage>) => {
             break;
         }
         case 'DESTROY': {
-            console.log("VisualizerWorker: Destroying");
+
             if (animationFrameId) {
                 cancelAnimationFrame(animationFrameId);
             }

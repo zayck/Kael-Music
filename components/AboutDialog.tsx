@@ -1,6 +1,6 @@
 import React from "react";
 import { createPortal } from "react-dom";
-import { AuraLogo } from "./Icons";
+import { KaelLogo } from "./Icons";
 
 interface AboutDialogProps {
     isOpen: boolean;
@@ -46,25 +46,29 @@ const AboutDialog: React.FC<AboutDialogProps> = ({ isOpen, onClose }) => {
                     <div className="relative group mb-6">
                         <div className="absolute inset-0 bg-gradient-to-tr from-purple-500 to-orange-500 rounded-[24px] blur-xl opacity-40 group-hover:opacity-60 transition-opacity duration-500" />
                         <div className="relative w-24 h-24 rounded-[24px] shadow-2xl overflow-hidden bg-black/20 ring-1 ring-white/10">
-                            <AuraLogo className="w-full h-full drop-shadow-lg" />
+                            <KaelLogo className="w-full h-full drop-shadow-lg" />
                         </div>
                     </div>
 
                     {/* Title & Version */}
                     <h3 className="text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-br from-white via-white to-white/60 tracking-tight mb-1">
-                        Aura Music
+                        Kael Music
                     </h3>
                     <div className="inline-flex items-center px-2.5 py-0.5 rounded-full bg-white/5 border border-white/5 text-[11px] font-medium text-white/40 tracking-wide uppercase mb-6">
                         v1.4.0 • Web
                     </div>
 
                     {/* Description */}
-                    <p className="text-white/70 text-[15px] leading-relaxed mb-8 font-medium">
+                    <p className="text-white/70 text-[15px] leading-relaxed mb-2 font-medium">
                         An experimental, pure web music player crafted with
                         <span className="text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-pink-400 font-bold mx-1">
                             Vibe Coding
                         </span>
                         technology.
+                    </p>
+                    
+                    <p className="text-white/50 text-sm mb-8">
+                        Copyright © 2026 <span className="cursor-pointer text-white transition-colors" onClick={() => window.location.href = '/'}>Zayck 少阳</span>
                     </p>
 
                     {/* Tech Stack Grid */}
@@ -77,24 +81,24 @@ const AboutDialog: React.FC<AboutDialogProps> = ({ isOpen, onClose }) => {
                     {/* Selection List */}
                     <div className="w-full flex flex-col gap-2 mb-6">
                         <a
-                            href="https://github.com/dingyi222666/aura-music"
+                            href="https://github.com/zayck/kael-music"
                             target="_blank"
                             rel="noreferrer"
                             onClick={(e) => e.stopPropagation()}
                             className="flex items-center justify-between px-4 py-3 rounded-2xl border border-white/15 bg-white/5 text-sm font-medium text-white/80 hover:bg-white/10 transition"
                         >
-                            <span>View on GitHub</span>
+                            <span>✨ View on GitHub</span>
                             <span className="text-[11px] text-white/50">↗</span>
                         </a>
 
                         <a
-                            href="https://github.com/dingyi222666"
+                            href="/sponsor"
                             target="_blank"
                             rel="noreferrer"
                             onClick={(e) => e.stopPropagation()}
                             className="flex items-center justify-between px-4 py-3 rounded-2xl border border-white/15 bg-white/5 text-sm font-medium text-white/80 hover:bg-white/10 transition"
                         >
-                            <span>Created by dingyi222666</span>
+                            <span>☕ Buy me a Coffee</span>
                             <span className="text-[11px] text-white/50">↗</span>
                         </a>
                     </div>

@@ -127,7 +127,7 @@ const createShader = (
   glCtx.shaderSource(shader, source);
   glCtx.compileShader(shader);
   if (!glCtx.getShaderParameter(shader, glCtx.COMPILE_STATUS)) {
-    console.error(glCtx.getShaderInfoLog(shader));
+
     glCtx.deleteShader(shader);
     return null;
   }
@@ -215,7 +215,7 @@ self.onmessage = (event: MessageEvent<WorkerCommand>) => {
 
     gl = canvas.getContext("webgl");
     if (!gl) {
-      console.error("WebGL not supported in web worker background");
+
       return;
     }
 
@@ -224,7 +224,7 @@ self.onmessage = (event: MessageEvent<WorkerCommand>) => {
     gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
 
     if (!initProgram()) {
-      console.error("Failed to initialize shader program in worker");
+
       return;
     }
 

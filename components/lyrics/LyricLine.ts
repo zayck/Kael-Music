@@ -55,8 +55,8 @@ const getFonts = (isMobile: boolean) => {
   const baseSize = isMobile ? 32 : 40;
   const transSize = isMobile ? 18 : 22;
   return {
-    main: `800 ${baseSize}px "PingFang SC", "Inter", sans-serif`,
-    trans: `500 ${transSize}px "PingFang SC", "Inter", sans-serif`,
+    main: `800 ${baseSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif`,
+    trans: `500 ${transSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif`,
     mainHeight: baseSize,
     transHeight: transSize * 1.3,
   };

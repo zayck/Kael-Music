@@ -123,7 +123,7 @@ export const usePlayer = ({
         audioRef.current.currentTime = 0;
         setCurrentTime(0);
       }
-      audioRef.current.play().catch((err) => console.error("Play failed", err));
+      audioRef.current.play().catch(() => {});
       setPlayState(PlayState.PLAYING);
     }
   }, [playState]);
@@ -132,7 +132,7 @@ export const usePlayer = ({
     if (!audioRef.current) return;
     audioRef.current
       .play()
-      .catch((err) => console.error("Play failed", err));
+      .catch(() => {});
     setPlayState(PlayState.PLAYING);
   }, []);
 
@@ -162,7 +162,7 @@ export const usePlayer = ({
         if (playImmediately) {
           audioRef.current
             .play()
-            .catch((err) => console.error("Play failed", err));
+            .catch(() => {});
           setPlayState(PlayState.PLAYING);
         }
       }
@@ -183,7 +183,7 @@ export const usePlayer = ({
     if (playState === PlayState.PLAYING) {
       audioRef.current
         .play()
-        .catch((err) => console.error("Auto-play failed", err));
+        .catch(() => {});
     }
   }, [playState]);
 
@@ -231,7 +231,7 @@ export const usePlayer = ({
         audioRef.current.currentTime = 0;
         audioRef.current
           .play()
-          .catch((err) => console.error("Play failed", err));
+          .catch(() => {});
       }
       setPlayState(PlayState.PLAYING);
       return;
@@ -389,7 +389,7 @@ export const usePlayer = ({
           }
         }
       } catch (error) {
-        console.warn("Lyrics matching failed:", error);
+
         markMatchFailed();
       }
     };
@@ -406,7 +406,6 @@ export const usePlayer = ({
     if (!audio) return;
 
     const handleAudioError = () => {
-      console.warn("Audio playback error detected");
       audio.pause();
       audio.currentTime = 0;
       setPlayState(PlayState.PAUSED);
@@ -454,7 +453,6 @@ export const usePlayer = ({
   useEffect(() => {
     if (
       !currentSong ||
-      !currentSong.isNetease ||
       !currentSong.coverUrl ||
       (currentSong.colors && currentSong.colors.length > 0)
     ) {
@@ -467,7 +465,7 @@ export const usePlayer = ({
           updateSongInQueue(currentSong.id, { colors });
         }
       })
-      .catch((err) => console.warn("Color extraction failed", err));
+      .catch(() => {});
   }, [currentSong, updateSongInQueue]);
 
   useEffect(() => {
@@ -625,7 +623,6 @@ export const usePlayer = ({
       } catch (error) {
         if (!canceled) {
           // Not critical - browser is still playing via native buffering
-          console.warn("Background audio caching failed:", error);
         }
       } finally {
         if (!canceled) {

@@ -36,17 +36,15 @@ const Visualizer: React.FC<VisualizerProps> = ({ audioRef, isPlaying }) => {
             // Load AudioWorklet
             if (!workletNodeRef.current) {
                 try {
-                    console.log("Visualizer: Loading AudioWorklet module...");
+
                     // Load the module using a URL pointing to the JS file
                     await ctx.audioWorklet.addModule(audioProcessorUrl);
-                    console.log("Visualizer: AudioWorklet module loaded successfully.");
+
 
                     const workletNode = new AudioWorkletNode(ctx, 'audio-processor');
-                    workletNode.port.onmessage = (e) => {
-                        console.log("Visualizer: Message from Worklet:", e.data);
-                    };
+                    workletNode.port.onmessage = (e) => {};
                     workletNodeRef.current = workletNode;
-                    console.log("Visualizer: AudioWorkletNode created.");
+
 
                     // Connect Source -> Worklet -> Destination
                     if (!sourceMap.has(audioEl)) {
@@ -63,7 +61,7 @@ const Visualizer: React.FC<VisualizerProps> = ({ audioRef, isPlaying }) => {
                     }
 
                 } catch (e) {
-                    console.error("Visualizer: Failed to load AudioWorklet", e);
+                    // Silent error handling
                 }
             }
         };
@@ -99,9 +97,8 @@ const Visualizer: React.FC<VisualizerProps> = ({ audioRef, isPlaying }) => {
 
         const isOffscreenSupported = !!canvasEl.transferControlToOffscreen;
         if (!isOffscreenSupported) {
-            console.warn("Visualizer: OffscreenCanvas not available, skipping worker");
-            return;
-        }
+                return;
+            }
 
         try {
             const worker = new Worker(new URL('./VisualizerWorker.ts', import.meta.url), {
@@ -144,7 +141,7 @@ const Visualizer: React.FC<VisualizerProps> = ({ audioRef, isPlaying }) => {
             };
             sendPortToWorklet();
         } catch (e) {
-            console.error("Visualizer: Failed to initialize worker", e);
+            // Silent error handling
         }
 
         return () => {

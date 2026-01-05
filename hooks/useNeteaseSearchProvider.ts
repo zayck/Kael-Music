@@ -39,7 +39,6 @@ export const useNeteaseSearchProvider = (): NeteaseSearchProviderExtended => {
       setResults(searchResults);
       setHasMore(searchResults.length >= LIMIT);
     } catch (e) {
-      console.error("Netease search failed:", e);
       setHasMore(false);
     } finally {
       setIsLoading(false);
@@ -64,10 +63,9 @@ export const useNeteaseSearchProvider = (): NeteaseSearchProviderExtended => {
         }
         return searchResults;
       } catch (e) {
-        console.error("Load more failed:", e);
-        setHasMore(false);
-        return [];
-      } finally {
+      setHasMore(false);
+      return [];
+    } finally {
         setIsLoading(false);
       }
     },

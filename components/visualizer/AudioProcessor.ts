@@ -20,14 +20,14 @@ class AudioProcessor extends AudioWorkletProcessor {
         super();
         this.port2 = null;
         this.port.onmessage = (e) => {
-            console.log("AudioProcessor: Received message", e.data);
+
             if (e.data.type === 'PORT') {
                 this.port2 = e.data.port;
-                console.log("AudioProcessor: Port received and set");
+
                 this.port.postMessage({ type: 'PORT_RECEIVED' });
             }
         };
-        console.log("AudioProcessor: Initialized");
+
     }
 
     process(inputs: Float32Array[][], outputs: Float32Array[][], parameters: Record<string, Float32Array>): boolean {

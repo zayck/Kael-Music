@@ -44,7 +44,7 @@ export class UIBackgroundRender extends BaseBackgroundRender {
 
     this.ctx = this.canvas.getContext("2d");
     if (!this.ctx) {
-      console.error("Failed to get 2D context for UI background renderer");
+
       return;
     }
 

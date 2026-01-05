@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from "react";
-import { useSpring, animated, useTransition, to } from "@react-spring/web";
+import { useSpring, animated, to } from "@react-spring/web";
 import { formatTime } from "../services/utils";
 import Visualizer from "./visualizer/Visualizer";
 import SmartImage from "./SmartImage";
@@ -7,17 +7,10 @@ import {
   LoopIcon,
   LoopOneIcon,
   ShuffleIcon,
-  VolumeHighFilledIcon,
-  VolumeHighIcon,
-  VolumeLowFilledIcon,
-  VolumeLowIcon,
-  VolumeMuteFilledIcon,
-  VolumeMuteIcon,
   PauseIcon,
   PlayIcon,
   PrevIcon,
   NextIcon,
-  SettingsIcon,
   QueueIcon,
 } from "./Icons";
 import { PlayMode } from "../types";
@@ -37,17 +30,7 @@ interface ControlsProps {
   onToggleMode: () => void;
   onTogglePlaylist: () => void;
   accentColor: string;
-  volume: number;
-  onVolumeChange: (volume: number) => void;
-  speed: number;
-  preservesPitch: boolean;
-  onSpeedChange: (speed: number) => void;
-  onTogglePreservesPitch: () => void;
   coverUrl?: string;
-  showVolumePopup: boolean;
-  setShowVolumePopup: (show: boolean) => void;
-  showSettingsPopup: boolean;
-  setShowSettingsPopup: (show: boolean) => void;
   isBuffering: boolean;
 }
 
@@ -66,35 +49,9 @@ const Controls: React.FC<ControlsProps> = ({
   onToggleMode,
   onTogglePlaylist,
   accentColor,
-  volume,
-  onVolumeChange,
-  speed,
-  preservesPitch,
-  onSpeedChange,
-  onTogglePreservesPitch,
   coverUrl,
-  showVolumePopup,
-  setShowVolumePopup,
-  showSettingsPopup,
-  setShowSettingsPopup,
   isBuffering,
 }) => {
-  const volumeContainerRef = useRef<HTMLDivElement>(null);
-  const settingsContainerRef = useRef<HTMLDivElement>(null);
-
-  const volumeTransitions = useTransition(showVolumePopup, {
-    from: { opacity: 0, transform: "translate(-50%, 10px) scale(0.9)" },
-    enter: { opacity: 1, transform: "translate(-50%, 0px) scale(1)" },
-    leave: { opacity: 0, transform: "translate(-50%, 10px) scale(0.9)" },
-    config: { tension: 300, friction: 20 },
-  });
-
-  const settingsTransitions = useTransition(showSettingsPopup, {
-    from: { opacity: 0, transform: "translate(-50%, 10px) scale(0.9)" },
-    enter: { opacity: 1, transform: "translate(-50%, 0px) scale(1)" },
-    leave: { opacity: 0, transform: "translate(-50%, 10px) scale(0.9)" },
-    config: { tension: 300, friction: 20 },
-  });
 
   // Progress bar seeking state
   const [isSeeking, setIsSeeking] = useState(false);
@@ -142,7 +99,7 @@ const Controls: React.FC<ControlsProps> = ({
       if (isPlaying && !isSeeking && !isWaitingForSeek) {
         setInterpolatedTime((prev) => {
           // Simple linear extrapolation
-          const next = prev + dt * speed;
+          const next = prev + dt;
           // Clamp to duration
           return Math.min(next, duration);
         });
@@ -150,7 +107,7 @@ const Controls: React.FC<ControlsProps> = ({
         // If waiting for seek, we can still extrapolate from the target
         // to make it feel responsive immediately
         setInterpolatedTime((prev) => {
-          const next = prev + dt * speed;
+          const next = prev + dt;
           return Math.min(next, duration);
         });
       }
@@ -161,7 +118,7 @@ const Controls: React.FC<ControlsProps> = ({
     animationFrameId = requestAnimationFrame(animate);
 
     return () => cancelAnimationFrame(animationFrameId);
-  }, [currentTime, isPlaying, isSeeking, speed, duration, isWaitingForSeek]);
+  }, [currentTime, isPlaying, isSeeking, duration, isWaitingForSeek]);
 
   // Update buffered time range from audio element
   useEffect(() => {
@@ -252,48 +209,7 @@ const Controls: React.FC<ControlsProps> = ({
     return () => clearTimeout(timeout);
   }, [coverUrl, isPlaying, coverApi]);
 
-  // Close popups when clicking outside
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (
-        volumeContainerRef.current &&
-        !volumeContainerRef.current.contains(event.target as Node)
-      ) {
-        setShowVolumePopup(false);
-      }
-      if (
-        settingsContainerRef.current &&
-        !settingsContainerRef.current.contains(event.target as Node)
-      ) {
-        setShowSettingsPopup(false);
-      }
-    };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [setShowVolumePopup, setShowSettingsPopup]);
 
-  // Scroll to adjust volume/speed
-  useEffect(() => {
-    if (!showVolumePopup && !showSettingsPopup) return;
-
-    const handleWheel = (e: WheelEvent) => {
-      e.preventDefault();
-      const delta = e.deltaY > 0 ? -1 : 1;
-
-      if (showVolumePopup) {
-        const step = 0.05;
-        const newVolume = Math.min(Math.max(volume + delta * step, 0), 1);
-        onVolumeChange(Number(newVolume.toFixed(2)));
-      } else if (showSettingsPopup) {
-        const step = 0.01;
-        const newSpeed = Math.min(Math.max(speed + delta * step, 0.5), 2);
-        onSpeedChange(Number(newSpeed.toFixed(2)));
-      }
-    };
-
-    window.addEventListener("wheel", handleWheel, { passive: false });
-    return () => window.removeEventListener("wheel", handleWheel);
-  }, [showVolumePopup, showSettingsPopup, volume, speed, onVolumeChange, onSpeedChange]);
 
   const getModeIcon = () => {
     // Standard white colors, simplified hover
@@ -315,26 +231,6 @@ const Controls: React.FC<ControlsProps> = ({
       default: // LOOP_ALL
         return <LoopIcon className={iconClass} />;
     }
-  };
-
-  const getVolumeButtonIcon = () => {
-    if (volume === 0) {
-      return <VolumeMuteIcon className="w-5 h-5" />;
-    }
-    if (volume < 0.5) {
-      return <VolumeLowIcon className="w-5 h-5" />;
-    }
-    return <VolumeHighIcon className="w-5 h-5" />;
-  };
-
-  const getVolumePopupIcon = () => {
-    if (volume === 0) {
-      return <VolumeMuteFilledIcon className="w-4 h-4" />;
-    }
-    if (volume < 0.5) {
-      return <VolumeLowFilledIcon className="w-4 h-4" />;
-    }
-    return <VolumeHighFilledIcon className="w-4 h-4" />;
   };
 
   const controlsScaleSpring = useSpring({
@@ -473,7 +369,7 @@ const Controls: React.FC<ControlsProps> = ({
 
       {/* Controls Row - Flattened for Equal Spacing */}
       {/* Layout: [Mode] [Vol] [Prev] [Play] [Next] [Settings] [List] */}
-      <div className="w-full max-w-[380px] mt-6 px-2">
+      <div className="w-full max-w-[380px] mt-2 md:mt-6 px-2">
         <div className="flex items-center justify-between w-full">
           {/* 1. Play Mode */}
           <button
@@ -484,29 +380,7 @@ const Controls: React.FC<ControlsProps> = ({
             {getModeIcon()}
           </button>
 
-          {/* 2. Volume */}
-          <div className="relative" ref={volumeContainerRef}>
-            <button
-              onClick={() => setShowVolumePopup(!showVolumePopup)}
-              className={`p-2 rounded-full hover:bg-white/10 transition-colors ${showVolumePopup ? "text-white" : "text-white/60 hover:text-white"
-                }`}
-              title="Volume"
-            >
-              {getVolumeButtonIcon()}
-            </button>
 
-            {/* Volume Popup */}
-            {volumeTransitions((style, item) =>
-              item ? (
-                <VolumePopup
-                  style={style}
-                  volume={volume}
-                  onVolumeChange={onVolumeChange}
-                  getVolumePopupIcon={getVolumePopupIcon}
-                />
-              ) : null
-            )}
-          </div>
 
           {/* 3. Previous */}
           <button
@@ -549,30 +423,7 @@ const Controls: React.FC<ControlsProps> = ({
             <NextIcon className="w-9 h-9" />
           </button>
 
-          {/* 6. Settings (Replaces Like) */}
-          <div className="relative" ref={settingsContainerRef}>
-            <button
-              onClick={() => setShowSettingsPopup(!showSettingsPopup)}
-              className={`p-2 rounded-full hover:bg-white/10 transition-colors ${showSettingsPopup ? "text-white" : "text-white/60 hover:text-white"
-                }`}
-              title="Settings"
-            >
-              <SettingsIcon className="w-5 h-5" />
-            </button>
 
-            {/* Settings Popup */}
-            {settingsTransitions((style, item) =>
-              item ? (
-                <SettingsPopup
-                  style={style}
-                  speed={speed}
-                  preservesPitch={preservesPitch}
-                  onTogglePreservesPitch={onTogglePreservesPitch}
-                  onSpeedChange={onSpeedChange}
-                />
-              ) : null
-            )}
-          </div>
 
           {/* 7. Playlist/Queue */}
           <button
@@ -590,132 +441,6 @@ const Controls: React.FC<ControlsProps> = ({
 
 export default Controls;
 
-interface VolumePopupProps {
-  style: any;
-  volume: number;
-  onVolumeChange: (volume: number) => void;
-  getVolumePopupIcon: () => React.ReactNode;
-}
 
-const VolumePopup: React.FC<VolumePopupProps> = ({
-  style,
-  volume,
-  onVolumeChange,
-  getVolumePopupIcon,
-}) => {
-  const { height } = useSpring({
-    height: volume * 100,
-    config: { tension: 210, friction: 20, clamp: true },
-  });
 
-  return (
-    <animated.div
-      style={style}
-      className="absolute bottom-full left-1/2 -translate-x-1/2 mb-8 z-50 w-[52px] h-[150px] rounded-[26px] p-1.5 bg-black/10 backdrop-blur-[100px] saturate-150 shadow-[0_20px_50px_rgba(0,0,0,0.3)] border border-white/5 flex flex-col cursor-auto"
-    >
-      <div className="relative w-full flex-1 rounded-[20px] bg-white/20 overflow-hidden backdrop-blur-[28px]">
-        {/* Fill */}
-        <animated.div
-          className="absolute bottom-0 w-full bg-white"
-          style={{ height: height.to((h) => `${h}%`) }}
-        />
 
-        {/* Input Overlay */}
-        <input
-          type="range"
-          min="0"
-          max="1"
-          step="0.01"
-          value={volume}
-          onChange={(e) => onVolumeChange(parseFloat(e.target.value))}
-          className="absolute inset-0 w-full h-full opacity-0 cursor-pointer touch-none"
-          style={
-            {
-              WebkitAppearance: "slider-vertical",
-              appearance: "slider-vertical",
-            } as any
-          }
-        />
-
-        {/* Icon Overlay (Mix Blend Mode) */}
-        <div className="absolute bottom-4 left-1/2 -translate-x-1/2 pointer-events-none text-white mix-blend-difference">
-          {getVolumePopupIcon()}
-        </div>
-      </div>
-    </animated.div>
-  );
-};
-
-interface SettingsPopupProps {
-  style: any;
-  speed: number;
-  preservesPitch: boolean;
-  onTogglePreservesPitch: () => void;
-  onSpeedChange: (speed: number) => void;
-}
-
-const SettingsPopup: React.FC<SettingsPopupProps> = ({
-  style,
-  preservesPitch,
-  onTogglePreservesPitch,
-  speed,
-  onSpeedChange,
-}) => {
-  const { speedH } = useSpring({
-    speedH: ((speed - 0.5) / 1.5) * 100,
-    config: { tension: 210, friction: 20 },
-  });
-
-  return (
-    <animated.div
-      style={style}
-      className="absolute bottom-full left-1/2 -translate-x-1/2 mb-8 z-50 p-4 rounded-[26px] bg-black/10 backdrop-blur-[100px] saturate-150 shadow-[0_20px_50px_rgba(0,0,0,0.3)] border border-white/5 flex gap-4 cursor-auto"
-    >
-      {/* Speed Control */}
-      <div className="flex flex-col items-center gap-2 w-12">
-        <div className="h-[150px] w-full relative rounded-[20px] bg-white/20 overflow-hidden backdrop-blur-[28px]">
-          <animated.div
-            className="absolute bottom-0 w-full bg-white"
-            style={{
-              height: speedH.to((h) => `${h}%`),
-            }}
-          />
-          <input
-            type="range"
-            min="0.5"
-            max="2"
-            step="0.01"
-            value={speed}
-            onChange={(e) => onSpeedChange(parseFloat(e.target.value))}
-            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer touch-none"
-            style={{
-              WebkitAppearance: "slider-vertical",
-              appearance: "slider-vertical",
-            } as any}
-          />
-          <div className="absolute bottom-2 left-1/2 -translate-x-1/2 pointer-events-none text-[10px] font-bold text-white mix-blend-difference">
-            {speed.toFixed(2)}x
-          </div>
-        </div>
-        <span className="text-[10px] font-medium text-white/60">Speed</span>
-      </div>
-
-      {/* Toggle Preserves Pitch */}
-      <div className="flex flex-col items-center justify-end gap-2 w-12 pb-6">
-        <button
-          onClick={onTogglePreservesPitch}
-          className={`w-12 h-12 rounded-full flex items-center justify-center transition-colors duration-200 ${preservesPitch ? "bg-white/20 text-white" : "bg-white text-black"
-            }`}
-          title={preservesPitch ? "Tone Preserved" : "Vinyl Mode"}
-        >
-          <span className="text-xs font-bold">
-            {preservesPitch ? "Dig" : "Vin"}
-          </span>
-        </button>
-        <span className="text-[10px] font-medium text-white/60 text-center leading-tight">
-          {preservesPitch ? "Digital" : "Vinyl"}
-        </span>
-      </div>
-    </animated.div>
-  );
-};

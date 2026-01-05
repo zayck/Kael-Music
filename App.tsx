@@ -53,9 +53,6 @@ const App: React.FC = () => {
 
   const [showPlaylist, setShowPlaylist] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
-  const [showVolumePopup, setShowVolumePopup] = useState(false);
-  const [showSettingsPopup, setShowSettingsPopup] = useState(false);
-  const [volume, setVolume] = useState(1);
 
   const [isMobileLayout, setIsMobileLayout] = useState(false);
   const [activePanel, setActivePanel] = useState<"controls" | "lyrics">(
@@ -70,11 +67,7 @@ const App: React.FC = () => {
     return window.innerWidth;
   });
 
-  useEffect(() => {
-    if (audioRef.current) {
-      audioRef.current.volume = volume;
-    }
-  }, [volume, audioRef]);
+
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -245,7 +238,7 @@ const App: React.FC = () => {
           currentTime={currentTime}
           duration={duration}
           onSeek={handleSeek}
-          title={currentSong?.title || "Welcome to Aura"}
+          title={currentSong?.title || "Welcome to Kael"}
           artist={currentSong?.artist || "Select a song"}
           audioRef={audioRef}
           onNext={playNext}
@@ -254,18 +247,8 @@ const App: React.FC = () => {
           onToggleMode={toggleMode}
           onTogglePlaylist={() => setShowPlaylist(true)}
           accentColor={accentColor}
-          volume={volume}
-          onVolumeChange={setVolume}
-          speed={player.speed}
-          preservesPitch={player.preservesPitch}
-          onSpeedChange={player.setSpeed}
-          onTogglePreservesPitch={player.togglePreservesPitch}
           coverUrl={currentSong?.coverUrl}
           isBuffering={isBuffering}
-          showVolumePopup={showVolumePopup}
-          setShowVolumePopup={setShowVolumePopup}
-          showSettingsPopup={showSettingsPopup}
-          setShowSettingsPopup={setShowSettingsPopup}
         />
 
         {/* Floating Playlist Panel */}
@@ -332,14 +315,8 @@ const App: React.FC = () => {
         onSeek={handleSeek}
         currentTime={currentTime}
         duration={duration}
-        volume={volume}
-        onVolumeChange={setVolume}
         onToggleMode={toggleMode}
         onTogglePlaylist={() => setShowPlaylist((prev) => !prev)}
-        speed={player.speed}
-        onSpeedChange={player.setSpeed}
-        onToggleVolumeDialog={() => setShowVolumePopup((prev) => !prev)}
-        onToggleSpeedDialog={() => setShowSettingsPopup((prev) => !prev)}
       />
 
       <MediaSessionController
@@ -406,20 +383,15 @@ const App: React.FC = () => {
               </div>
             </div>
           </div>
-          <div className="absolute bottom-6 left-1/2 -translate-x-1/2">
-            <button
-              type="button"
-              onClick={toggleIndicator}
-              className="relative flex h-4 w-28 items-center justify-center rounded-full bg-white/10 backdrop-blur-2xl border border-white/15 transition-transform duration-200 active:scale-105"
-              style={{
-                transform: `translateX(${isDragging ? dragOffsetX * 0.04 : 0}px)`,
-              }}
-            >
-              <span
-                className={`absolute inset-0 rounded-full bg-white/25 backdrop-blur-[30px] transition-opacity duration-200 ${activePanel === "controls" ? "opacity-90" : "opacity-60"
-                  }`}
-              />
-            </button>
+          <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex gap-4">
+            <div
+              className={`h-4 rounded-full bg-white/25 backdrop-blur-[30px] transition-all duration-300 ease-in-out cursor-pointer ${activePanel === "controls" ? "w-12" : "w-4"}`}
+              onClick={() => setActivePanel("controls")}
+            />
+            <div
+              className={`h-4 rounded-full bg-white/25 backdrop-blur-[30px] transition-all duration-300 ease-in-out cursor-pointer ${activePanel === "lyrics" ? "w-12" : "w-4"}`}
+              onClick={() => setActivePanel("lyrics")}
+            />
           </div>
         </div>
       ) : (

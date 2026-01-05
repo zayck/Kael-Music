@@ -219,54 +219,80 @@ const SmartImage: React.FC<SmartImageProps> = ({
 
       const ctx = canvas.getContext("2d");
       if (!ctx) {
-        handleFallback();
+        // Canvas not available, use original image
+        setFinalUrl(src, false);
         return;
       }
-
-      ctx.drawImage(imageElement, 0, 0, targetWidth, targetHeight);
 
       try {
-        canvas.toBlob(
-          (blob) => {
-            if (!blob || canceled) {
-              handleFallback();
-              return;
-            }
+        ctx.drawImage(imageElement, 0, 0, targetWidth, targetHeight);
 
-            try {
-              imageResourceCache.set(effectiveKey, blob);
-            } catch {
-              // Silently ignore cache failures.
-            }
+        try {
+          canvas.toBlob(
+            (blob) => {
+              if (!blob || canceled) {
+                // Blob creation failed, use original image
+                setFinalUrl(src, false);
+                return;
+              }
 
-            const optimizedUrl = URL.createObjectURL(blob);
-            if (canceled) {
-              URL.revokeObjectURL(optimizedUrl);
-              return;
-            }
-            setFinalUrl(optimizedUrl, true);
-          },
-          "image/jpeg",
-          0.78,
-        );
-      } catch {
-        handleFallback();
+              try {
+                imageResourceCache.set(effectiveKey, blob);
+              } catch {
+                // Silently ignore cache failures.
+              }
+
+              const optimizedUrl = URL.createObjectURL(blob);
+              if (canceled) {
+                URL.revokeObjectURL(optimizedUrl);
+                return;
+              }
+              setFinalUrl(optimizedUrl, true);
+            },
+            "image/jpeg",
+            0.78,
+          );
+        } catch {
+          // Canvas processing failed, use original image
+          setFinalUrl(src, false);
+        }
+      } catch (canvasError) {
+        // Canvas operation failed (likely due to CORS), use original image
+        setFinalUrl(src, false);
       }
     };
 
-    imageElement.crossOrigin = "anonymous";
+    // Enhanced image loading strategy
+    // 1. Try to load image with CORS support for canvas processing
+    // 2. If any step fails, immediately fall back to direct image display
+    
+    // First, try CORS-enabled loading for canvas processing
+    imageElement.crossOrigin = 'anonymous';
+    
     imageElement.onload = () => {
       if (canceled) return;
+      
+      // Validate image dimensions
       if (!imageElement.naturalWidth || !imageElement.naturalHeight) {
-        handleFallback();
+        setFinalUrl(src, false);
         return;
       }
-      loadImage();
+      
+      try {
+        // Try to process the image with canvas
+        loadImage();
+      } catch (error) {
+        setFinalUrl(src, false);
+      }
     };
+    
     imageElement.onerror = () => {
       if (canceled) return;
-      handleFallback();
+      // Directly use the original image URL when CORS fails
+      setFinalUrl(src, false);
     };
+    
+    // Start loading the image
     imageElement.src = src;
 
     return () => {

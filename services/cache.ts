@@ -1,3 +1,5 @@
+import { fetchImageViaProxy } from './utils';
+
 const MOBILE_BREAKPOINT = 1024;
 
 const isMobileViewport = () => {
@@ -77,13 +79,19 @@ export const fetchImageBlobWithCache = async (url: string): Promise<Blob> => {
   if (cached) {
     return cached;
   }
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(`Failed to fetch image: ${response.status}`);
+  
+  try {
+    const blob = await fetchImageViaProxy(url);
+    // Only cache successful blob responses
+    if (blob && blob.size > 0) {
+      rawImageCache.set(url, blob);
+    }
+    return blob;
+  } catch (error) {
+    // Don't cache failed requests
+
+    throw error;
   }
-  const blob = await response.blob();
-  rawImageCache.set(url, blob);
-  return blob;
 };
 
 export const loadImageElementWithCache = async (

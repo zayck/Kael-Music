@@ -1,10 +1,23 @@
 import { fetchViaProxy } from "./utils";
 
+// API Configuration
 const LYRIC_API_BASE = "https://163api.qijieya.cn";
 const METING_API = "https://api.qijieya.cn/meting/";
 const NETEASE_SEARCH_API = "https://163api.qijieya.cn/cloudsearch";
 const NETEASE_API_BASE = "http://music.163.com/api";
 const NETEASECLOUD_API_BASE = "https://163api.qijieya.cn";
+
+// Meting API Configuration
+const METING_CONFIG = {
+  // Primary API (working one first)
+  api: "https://api.injahow.cn/meting/?server=:server&type=:type&id=:id",
+  // Fallback APIs
+  fallbackApis: [
+    "https://api.moeyao.cn/meting/?server=:server&type=:type&id=:id",
+    "https://api.qijieya.cn/meting/?type=:type&id=:id&server=:server",
+    "https://api.i-meto.com/meting/api?server=:server&type=:type&id=:id" // This one had 500 errors
+  ]
+};
 
 const METADATA_KEYWORDS = [
   "歌词贡献者",
@@ -65,13 +78,22 @@ interface NeteaseSongDetailResponse {
   songs?: NeteaseApiSong[];
 }
 
-export interface NeteaseTrackInfo {
+// Base track interface supporting multiple platforms
+export interface TrackInfo {
   id: string;
   title: string;
   artist: string;
   album: string;
   coverUrl?: string;
   duration?: number;
+  platform: string; // netease, tencent, baidu, kugou, xiami
+  platformId: string;
+  isNetease?: boolean;
+  neteaseId?: string;
+}
+
+// Backward compatibility
+export interface NeteaseTrackInfo extends TrackInfo {
   isNetease: true;
   neteaseId: string;
 }
@@ -94,9 +116,128 @@ const mapNeteaseSongToTrack = (song: NeteaseApiSong): NeteaseTrackInfo => ({
   album: song.al?.name?.trim() ?? "",
   coverUrl: song.al?.picUrl?.replaceAll("http:", "https:"),
   duration: song.dt,
+  platform: "netease",
+  platformId: song.id.toString(),
   isNetease: true,
   neteaseId: song.id.toString(),
 });
+
+// Map Meting API song data to TrackInfo
+const mapMetingSongToTrack = (song: any, platform: string): TrackInfo => {
+  // Extract song ID from URL if not directly available
+  let songId = song.id;
+  if (!songId && song.url) {
+    // Extract from URL like: https://api.injahow.cn/meting/?server=tencent&type=url&id=004f2Iol3CAo01
+    const url = new URL(song.url);
+    const params = new URLSearchParams(url.search);
+    songId = params.get('id') || '';
+  }
+  
+  // Get cover URL and enhance for QQ Music if needed
+  let coverUrl = (song.pic_url || song.pic)?.replaceAll("http:", "https:");
+  
+  // For QQ Music, enhance cover URL to get higher quality images
+  if (platform === "tencent" && coverUrl) {
+    try {
+      // Check if it's already a direct y.gtimg.cn URL
+      if (coverUrl.includes("y.gtimg.cn")) {
+        // Extract albumMid from the URL
+        const url = new URL(coverUrl);
+        const pathParts = url.pathname.split("/");
+        const filename = pathParts[pathParts.length - 1];
+        const albumMidMatch = filename.match(/T002R\d+x\d+M000(\w+)\.jpg/);
+        
+        if (albumMidMatch && albumMidMatch[1]) {
+          const albumMid = albumMidMatch[1];
+          // Use higher quality (300x300) instead of default 90x90
+          coverUrl = `https://y.gtimg.cn/music/photo_new/T002R300x300M000${albumMid}.jpg`;
+        }
+      } else if (coverUrl.includes("meting")) {
+        // For Meting API proxy URLs, extract the albumId and construct direct URL
+        const url = new URL(coverUrl);
+        const params = new URLSearchParams(url.search);
+        const albumId = params.get('id');
+        
+        if (albumId) {
+          // Use the albumId directly for QQ Music
+          coverUrl = `https://y.gtimg.cn/music/photo_new/T002R300x300M000${albumId}.jpg`;
+        }
+      }
+    } catch (error) {
+      // Fall back to original URL if enhancement fails
+    }
+  }
+
+  return {
+    id: `${platform}-${songId || Date.now()}`,
+    title: song.name?.trim() ?? "",
+    artist: Array.isArray(song.artist) ? song.artist.join("/") : (song.artist?.trim() ?? ""),
+    album: song.album?.trim() ?? "",
+    coverUrl: coverUrl,
+    duration: song.duration,
+    platform: platform,
+    platformId: songId || '',
+    isNetease: platform === "netease",
+    neteaseId: platform === "netease" ? songId?.toString() : undefined,
+  };
+};
+
+// Fetch from Meting API with fallback support
+const fetchMetingApi = async (platform: string, type: string, id: string): Promise<any> => {
+  // Prepare URLs with placeholders replaced
+  const urls = [
+    METING_CONFIG.api
+      .replace(":server", platform)
+      .replace(":type", type)
+      .replace(":id", id),
+    ...METING_CONFIG.fallbackApis.map(api => 
+      api.replace(":server", platform)
+         .replace(":type", type)
+         .replace(":id", id)
+    )
+  ];
+
+  // Try each URL until one succeeds
+  for (const url of urls) {
+    try {
+      const data = await fetchViaProxy(url);
+      if (data && (Array.isArray(data) || (data.songs && Array.isArray(data.songs)))) {
+        return data;
+      }
+    } catch (error) {
+      // Continue to next fallback
+    }
+  }
+
+  throw new Error("All Meting API attempts failed");
+};
+
+// Fetch tracks from any platform using Meting API
+export const fetchTracksFromPlatform = async (
+  platform: string,
+  type: "song" | "playlist",
+  id: string
+): Promise<TrackInfo[]> => {
+  const data = await fetchMetingApi(platform, type, id);
+  const songs = Array.isArray(data) ? data : data.songs || [];
+  
+  if (songs.length === 0) {
+    throw new Error(`No songs found in ${platform} ${type}`);
+  }
+
+  return songs.map(song => mapMetingSongToTrack(song, platform));
+};
+
+// Get audio URL for any platform
+export const getAudioUrl = (platform: string, id: string): string => {
+  // For Netease, use existing API
+  if (platform === "netease") {
+    return getNeteaseAudioUrl(id);
+  }
+  // For other platforms, use primary Meting API URL pattern
+  const primaryApi = METING_CONFIG.api.replace(":server", platform).replace(":type", "url").replace(":id", id);
+  return primaryApi;
+};
 
 const isMetadataTimestampLine = (line: string): boolean => {
   const trimmed = line.trim();
@@ -188,7 +329,6 @@ export const searchNetEase = async (
 
     return songs.map(mapNeteaseSongToTrack);
   } catch (error) {
-    console.error("NetEase search error", error);
     return [];
   }
 };
@@ -226,7 +366,6 @@ export const fetchNeteasePlaylist = async (
 
     return allTracks;
   } catch (e) {
-    console.error("Playlist fetch error", e);
     return [];
   }
 };
@@ -245,7 +384,6 @@ export const fetchNeteaseSong = async (
     }
     return null;
   } catch (e) {
-    console.error("Song fetch error", e);
     return null;
   }
 };
@@ -259,17 +397,14 @@ export const searchAndMatchLyrics = async (
     const songs = await searchNetEase(`${title} ${artist}`, { limit: 5 });
 
     if (songs.length === 0) {
-      console.warn("No songs found on Cloud");
       return null;
     }
 
     const songId = songs[0].id;
-    console.log(`Found Song ID: ${songId}`);
 
     const lyricsResult = await fetchLyricsById(songId);
     return lyricsResult;
   } catch (error) {
-    console.error("Cloud lyrics match failed:", error);
     return null;
   }
 };
@@ -334,7 +469,6 @@ export const fetchLyricsById = async (
       metadata: Array.from(metadataSet),
     };
   } catch (e) {
-    console.error("Lyric fetch error", e);
     return null;
   }
 };

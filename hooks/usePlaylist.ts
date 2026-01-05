@@ -3,13 +3,16 @@ import { Song } from "../types";
 import {
   extractColors,
   parseAudioMetadata,
-  parseNeteaseLink,
+  parseMusicLink,
 } from "../services/utils";
 import { parseLyrics } from "../services/lyrics";
 import {
   fetchNeteasePlaylist,
   fetchNeteaseSong,
   getNeteaseAudioUrl,
+  fetchTracksFromPlatform,
+  getAudioUrl,
+  TrackInfo,
 } from "../services/lyricsService";
 import { audioResourceCache } from "../services/cache";
 
@@ -158,7 +161,7 @@ export const usePlaylist = () => {
             try {
               lyrics = parseLyrics(metadata.lyrics);
             } catch (err) {
-              console.warn("Failed to parse embedded lyrics", err);
+              // Failed to parse embedded lyrics
             }
           }
 
@@ -204,7 +207,7 @@ export const usePlaylist = () => {
             }
           }
         } catch (err) {
-          console.warn("Local metadata extraction failed", err);
+          // Local metadata extraction failed
         }
 
         newSongs.push({
@@ -227,43 +230,58 @@ export const usePlaylist = () => {
 
   const importFromUrl = useCallback(
     async (input: string): Promise<ImportResult> => {
-      const parsed = parseNeteaseLink(input);
+      const parsed = parseMusicLink(input);
       if (!parsed) {
         return {
           success: false,
           message:
-            "Invalid Netease URL. Use https://music.163.com/#/song?id=... or playlist",
+            "Invalid URL. Supported platforms: NetEase, QQ Music, Baidu Music, Kugou Music, Xiami Music",
           songs: [],
         };
       }
 
       const newSongs: Song[] = [];
       try {
-        if (parsed.type === "playlist") {
-          const songs = await fetchNeteasePlaylist(parsed.id);
-          songs.forEach((song) => {
+        // Handle different platforms
+        if (parsed.platform === "netease") {
+          // Use existing NetEase API for better compatibility
+          if (parsed.type === "playlist") {
+            const songs = await fetchNeteasePlaylist(parsed.id);
+            songs.forEach((song) => {
+              newSongs.push({
+                ...song,
+                fileUrl: getNeteaseAudioUrl(song.id),
+                lyrics: [],
+                colors: [],
+                needsLyricsMatch: true,
+              });
+            });
+          } else {
+            const song = await fetchNeteaseSong(parsed.id);
+            if (song) {
+              newSongs.push({
+                ...song,
+                fileUrl: getNeteaseAudioUrl(song.id),
+                lyrics: [],
+                colors: [],
+                needsLyricsMatch: true,
+              });
+            }
+          }
+        } else {
+          // Use Meting API for other platforms
+          const songs = await fetchTracksFromPlatform(parsed.platform, parsed.type, parsed.id);
+          songs.forEach((song: TrackInfo) => {
             newSongs.push({
               ...song,
-              fileUrl: getNeteaseAudioUrl(song.id),
+              fileUrl: getAudioUrl(song.platform, song.platformId),
               lyrics: [],
               colors: [],
               needsLyricsMatch: true,
             });
           });
-        } else {
-          const song = await fetchNeteaseSong(parsed.id);
-          if (song) {
-            newSongs.push({
-              ...song,
-              fileUrl: getNeteaseAudioUrl(song.id),
-              lyrics: [],
-              colors: [],
-              needsLyricsMatch: true,
-            });
-          }
         }
       } catch (err) {
-        console.error("Failed to fetch Netease music", err);
         return {
           success: false,
           message: "Failed to load songs from URL",

@@ -10,14 +10,8 @@ interface KeyboardShortcutsProps {
   onSeek: (time: number) => void;
   currentTime: number;
   duration: number;
-  volume: number;
-  onVolumeChange: (vol: number) => void;
   onToggleMode: () => void;
   onTogglePlaylist: () => void;
-  speed: number;
-  onSpeedChange: (speed: number) => void;
-  onToggleVolumeDialog: () => void;
-  onToggleSpeedDialog: () => void;
 }
 
 const KeyboardShortcuts: React.FC<KeyboardShortcutsProps> = ({
@@ -28,14 +22,8 @@ const KeyboardShortcuts: React.FC<KeyboardShortcutsProps> = ({
   onSeek,
   currentTime,
   duration,
-  volume,
-  onVolumeChange,
   onToggleMode,
   onTogglePlaylist,
-  speed,
-  onSpeedChange,
-  onToggleVolumeDialog,
-  onToggleSpeedDialog,
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [isVisible, setIsVisible] = useState(false);
@@ -103,29 +91,13 @@ const KeyboardShortcuts: React.FC<KeyboardShortcutsProps> = ({
             onSeek(Math.max(currentTime - 5, 0));
           }
           return true;
-        case "ArrowUp":
-          e.preventDefault();
-          onVolumeChange(Math.min(volume + 0.1, 1));
-          return true;
-        case "ArrowDown":
-          e.preventDefault();
-          onVolumeChange(Math.max(volume - 0.1, 0));
-          return true;
+
         case "l":
         case "L":
           e.preventDefault();
           onToggleMode();
           return true;
-        case "v":
-        case "V":
-          e.preventDefault();
-          onToggleVolumeDialog();
-          return true;
-        case "s":
-        case "S":
-          e.preventDefault();
-          onToggleSpeedDialog();
-          return true;
+
       }
 
       return false;
@@ -210,9 +182,7 @@ return createPortal(
             <ShortcutItem keys={["L"]} label="Loop Mode" />
             <ShortcutItem keys={["←", "→"]} label="Seek ±5s" />
             <ShortcutItem keys={["Ctrl", "←/→"]} label="Prev / Next Song" />
-            <ShortcutItem keys={["↑", "↓"]} label="Volume Control" />
-            <ShortcutItem keys={["V"]} label="Volume Dialog" />
-            <ShortcutItem keys={["S"]} label="Speed Dialog" />
+
             <ShortcutItem keys={["Ctrl", "K"]} label="Search" />
             <ShortcutItem keys={["Ctrl", "P"]} label="Toggle Playlist" />
             <ShortcutItem keys={["Ctrl", "/"]} label="Toggle Shortcuts" />

@@ -219,7 +219,7 @@ const createBaseTexture = async (
       ctx.drawImage(img, x, y, w, h);
       ctx.globalAlpha = 1.0;
     } catch (error) {
-      console.warn("Failed to load cover", error);
+
     }
   }
 

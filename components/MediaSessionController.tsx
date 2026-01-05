@@ -165,7 +165,7 @@ const MediaSessionController: React.FC<MediaSessionControllerProps> = ({
         mediaSession.setActionHandler(action, handler);
       } catch (error) {
         // Some browsers restrict certain actions; ignore failures.
-        console.debug(`MediaSession handler registration failed for ${action}`, error);
+
       }
     });
 

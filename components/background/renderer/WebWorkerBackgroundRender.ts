@@ -19,7 +19,7 @@ export class WebWorkerBackgroundRender extends BaseBackgroundRender {
 
   start(colors: string[]) {
     if (!WebWorkerBackgroundRender.isSupported(this.canvas)) {
-      console.warn("WebWorker background renderer requires OffscreenCanvas support");
+
       return;
     }
 
@@ -38,7 +38,7 @@ export class WebWorkerBackgroundRender extends BaseBackgroundRender {
       };
       this.worker.postMessage(command, [offscreen]);
     } catch (error) {
-      console.error("Failed to initialize web worker renderer", error);
+
       this.worker = null;
     }
   }

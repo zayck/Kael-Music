@@ -1,5 +1,5 @@
 import React, { useRef, useState } from "react";
-import { AuraLogo, SearchIcon, CloudDownloadIcon, InfoIcon, FullscreenIcon } from "./Icons";
+import { KaelLogo, SearchIcon, CloudUploadIcon, InfoIcon, FullscreenIcon } from "./Icons";
 import AboutDialog from "./AboutDialog";
 
 interface TopBarProps {
@@ -23,8 +23,8 @@ const TopBar: React.FC<TopBarProps> = ({
     if (!document.fullscreenElement) {
       document.documentElement.requestFullscreen().then(() => {
         setIsFullscreen(true);
-      }).catch((err) => {
-        console.error(`Error attempting to enable fullscreen: ${err.message} (${err.name})`);
+      }).catch(() => {
+        // Handle fullscreen error silently
       });
     } else {
       if (document.exitFullscreen) {
@@ -107,12 +107,15 @@ const TopBar: React.FC<TopBarProps> = ({
       {/* Content (Animate in) */}
       <div className="relative z-10 w-full h-full px-6 flex justify-between items-center pointer-events-auto">
         {/* Logo / Title */}
-        <div className={`flex items-center gap-3 ${baseTransitionClasses} ${mobileActiveClasses} ${hoverSupportClasses}`}>
+        <div 
+          className={`flex items-center gap-3 cursor-pointer ${baseTransitionClasses} ${mobileActiveClasses} ${hoverSupportClasses}`}
+          onClick={() => { window.location.href = '/'; }}
+        >
           <div className="w-9 h-9 rounded-[10px] shadow-lg shadow-purple-500/20 overflow-hidden">
-            <AuraLogo className="w-full h-full" />
+            <KaelLogo className="w-full h-full" />
           </div>
           <h1 className="text-white/90 font-bold tracking-wider text-sm uppercase hidden sm:block drop-shadow-md">
-            Aura Music
+            Kael Music
           </h1>
         </div>
 
@@ -136,14 +139,14 @@ const TopBar: React.FC<TopBarProps> = ({
             className="w-10 h-10 rounded-full bg-white/10 backdrop-blur-xl border border-white/10 flex items-center justify-center text-white/80 hover:bg-white/20 hover:text-white transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
             title="Import Local Files"
           >
-            <CloudDownloadIcon className="w-5 h-5" />
+            <CloudUploadIcon className="w-5 h-5" />
           </button>
 
           {/* About Button */}
           <button
             onClick={() => setIsAboutOpen(true)}
             className="w-10 h-10 rounded-full bg-white/10 backdrop-blur-xl border border-white/10 flex items-center justify-center text-white/80 hover:bg-white/20 hover:text-white transition-all shadow-sm"
-            title="About Aura Music"
+            title="About Kael Music"
           >
             <InfoIcon className="w-5 h-5" />
           </button>
@@ -151,7 +154,7 @@ const TopBar: React.FC<TopBarProps> = ({
           {/* Fullscreen Button */}
           <button
             onClick={toggleFullscreen}
-            className="w-10 h-10 rounded-full bg-white/10 backdrop-blur-xl border border-white/10 flex items-center justify-center text-white/80 hover:bg-white/20 hover:text-white transition-all shadow-sm"
+            className="hidden sm:flex w-10 h-10 rounded-full bg-white/10 backdrop-blur-xl border border-white/10 flex items-center justify-center text-white/80 hover:bg-white/20 hover:text-white transition-all shadow-sm"
             title={isFullscreen ? "Exit Fullscreen" : "Enter Fullscreen"}
           >
             <FullscreenIcon className="w-5 h-5" isFullscreen={isFullscreen} />
