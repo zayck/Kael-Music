@@ -81,7 +81,7 @@ const AboutDialog: React.FC<AboutDialogProps> = ({ isOpen, onClose }) => {
                     {/* Selection List */}
                     <div className="w-full flex flex-col gap-2 mb-6">
                         <a
-                            href="https://github.com/zayck/kael-music"
+                            href="https://github.com/zayck/Kael-Music"
                             target="_blank"
                             rel="noreferrer"
                             onClick={(e) => e.stopPropagation()}
