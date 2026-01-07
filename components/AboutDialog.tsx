@@ -92,7 +92,7 @@ const AboutDialog: React.FC<AboutDialogProps> = ({ isOpen, onClose }) => {
                         </a>
 
                         <a
-                            href="/sponsor"
+                            href="https://zayck.pages.dev/sponsor"
                             target="_blank"
                             rel="noreferrer"
                             onClick={(e) => e.stopPropagation()}
